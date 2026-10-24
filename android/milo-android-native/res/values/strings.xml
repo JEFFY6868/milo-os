@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Milo Native Call</string>
+    <string name="ai_name">Milo AI</string>
+    <string name="director_tag">Executive Director Companion</string>
+    <string name="call_milo">CALL MILO</string>
+    <string name="hold_to_talk">Hold or Tap to Speak</string>
+    <string name="listening">LISTENING</string>
+    <string name="speaking">SPEAKING</string>
+    <string name="thinking">THINKING</string>
+    <string name="recording">RECORDING</string>
+    <string name="accept">Accept</string>
+    <string name="decline">Decline</string>
+</resources>

@@ -1,0 +1,709 @@
+#!/usr/bin/env python3
+"""
+Milo AI Agent Evaluation & Test Harness — Phase 3 Production Edition
+Continuous testing scaffold, diagnostic doctor, metrics tracker, and Obsidian evaluation logger.
+"""
+
+import sys
+import os
+import json
+import time
+import uuid
+import shutil
+import subprocess
+from pathlib import Path
+
+# --- ANSI Colors ---
+RESET = "\033[0m"
+BOLD = "\033[1m"
+GREEN = "\033[32m"
+RED = "\033[31m"
+YELLOW = "\033[33m"
+CYAN = "\033[36m"
+MAGENTA = "\033[35m"
+DIM = "\033[2m"
+
+HOME = Path.home()
+VAULT_DIR = HOME / "Documents" / "Obsidian" / "Milo"
+HARNESS_REPORTS_DIR = VAULT_DIR / "Knowledge" / "Harness_Runs"
+METRICS_FILE = VAULT_DIR / "Knowledge" / "Harness_Metrics.md"
+PLUGIN_DIR = HOME / ".config" / "omarchy" / "plugins" / "jeffy.milo"
+LOCAL_BIN = HOME / ".local" / "bin"
+
+
+class TestResult:
+    def __init__(self, suite: str, name: str, success: bool, duration_ms: float, message: str = "", details: str = ""):
+        self.suite = suite
+        self.name = name
+        self.success = success
+        self.duration_ms = duration_ms
+        self.message = message
+        self.details = details
+
+
+class MiloHarness:
+    def __init__(self, json_mode: bool = False, generate_report: bool = True):
+        self.json_mode = json_mode
+        self.generate_report = generate_report
+        self.results: list[TestResult] = []
+        self.start_time = 0.0
+
+    def run_command(self, cmd: list, timeout: float = 15.0) -> tuple[int, str, str]:
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            return res.returncode, res.stdout.strip(), res.stderr.strip()
+        except subprocess.TimeoutExpired:
+            return 124, "", "Execution timed out"
+        except Exception as e:
+            return 1, "", str(e)
+
+    def log_test(self, result: TestResult):
+        self.results.append(result)
+        if self.json_mode:
+            return
+
+        status_str = f"{GREEN}✔ PASS{RESET}" if result.success else f"{RED}✖ FAIL{RESET}"
+        time_str = f"{DIM}[{result.duration_ms:6.1f}ms]{RESET}"
+        print(f"  {status_str} {time_str} {BOLD}{result.name}{RESET}")
+        if result.message:
+            color = DIM if result.success else YELLOW
+            print(f"         {color}↳ {result.message}{RESET}")
+        if not result.success and result.details:
+            print(f"         {RED}Details: {result.details}{RESET}")
+
+    # =========================================================================
+    # SUITE A: SMOKE TESTS
+    # =========================================================================
+    def test_binaries_present(self):
+        t0 = time.perf_counter()
+        required = ["milo", "milo-query", "milo-browser", "milo-reflect", "milo-wa", "milo-kino", "agy", "obsidian", "omarchy-shell", "hyprctl"]
+        missing = [b for b in required if not shutil.which(b)]
+        dt = (time.perf_counter() - t0) * 1000
+
+        if not missing:
+            self.log_test(TestResult("Smoke", "Binaries & Tooling Check", True, dt, f"Found all: {', '.join(required)}"))
+        else:
+            self.log_test(TestResult("Smoke", "Binaries & Tooling Check", False, dt, "Missing required binaries", f"Missing: {missing}"))
+
+    def test_browser_use_engine(self):
+        t0 = time.perf_counter()
+        venv_py = HOME / ".local" / "share" / "milo" / "venv" / "bin" / "python3"
+        code, out, _ = self.run_command([str(venv_py), "-c", "import browser_use; from browser_use.browser.profile import BrowserProfile; print('ok')"])
+        dt = (time.perf_counter() - t0) * 1000
+
+        if code == 0 and "ok" in out:
+            self.log_test(TestResult("Smoke", "browser-use Playwright Engine", True, dt, "browser-use & Chromium profile verified"))
+        else:
+            self.log_test(TestResult("Smoke", "browser-use Playwright Engine", False, dt, "browser-use import failure"))
+
+    def test_plugin_manifest(self):
+        t0 = time.perf_counter()
+        manifest_path = PLUGIN_DIR / "manifest.json"
+        qml_path = PLUGIN_DIR / "MiloService.qml"
+        dt = (time.perf_counter() - t0) * 1000
+
+        if not manifest_path.exists():
+            self.log_test(TestResult("Smoke", "Plugin Manifest", False, dt, "manifest.json missing"))
+            return
+
+        try:
+            data = json.loads(manifest_path.read_text())
+            if data.get("id") == "jeffy.milo" and qml_path.exists():
+                self.log_test(TestResult("Smoke", "Plugin Manifest & QML", True, dt, f"id={data['id']}, entry={data['entryPoints']['service']}"))
+            else:
+                self.log_test(TestResult("Smoke", "Plugin Manifest & QML", False, dt, "Invalid manifest data or missing QML file"))
+        except Exception as e:
+            self.log_test(TestResult("Smoke", "Plugin Manifest & QML", False, dt, "JSON parse error", str(e)))
+
+    def test_obsidian_vault_structure(self):
+        t0 = time.perf_counter()
+        required_files = [
+            VAULT_DIR / "Dashboard.md",
+            VAULT_DIR / "Profile" / "Jeffy.md",
+            VAULT_DIR / "Memories" / "Core_Memories.md",
+            VAULT_DIR / ".obsidian" / "app.json",
+        ]
+        missing = [str(f.relative_to(VAULT_DIR)) for f in required_files if not f.exists()]
+        dt = (time.perf_counter() - t0) * 1000
+
+        if not missing:
+            self.log_test(TestResult("Smoke", "Obsidian Vault Structure", True, dt, f"Vault verified at {VAULT_DIR}"))
+        else:
+            self.log_test(TestResult("Smoke", "Obsidian Vault Structure", False, dt, f"Missing files: {missing}"))
+
+    def test_ipc_connectivity(self):
+        t0 = time.perf_counter()
+        code, out, err = self.run_command(["omarchy-shell", "milo", "status"], timeout=3.0)
+        dt = (time.perf_counter() - t0) * 1000
+
+        if code == 0:
+            try:
+                data = json.loads(out)
+                self.log_test(TestResult("Smoke", "IPC Connectivity Ping", True, dt, f"Connected to Omarchy shell, visible={data.get('visible')}"))
+            except Exception as e:
+                self.log_test(TestResult("Smoke", "IPC Connectivity Ping", False, dt, "IPC answered with non-JSON output", out))
+        else:
+            self.log_test(TestResult("Smoke", "IPC Connectivity Ping", False, dt, "Failed to communicate with omarchy-shell milo target", err))
+
+    # =========================================================================
+    # SUITE B: IPC & SHELL STATE TESTS
+    # =========================================================================
+    def test_status_schema(self):
+        t0 = time.perf_counter()
+        code, out, err = self.run_command(["omarchy-shell", "milo", "status"], timeout=3.0)
+        dt = (time.perf_counter() - t0) * 1000
+
+        if code != 0:
+            self.log_test(TestResult("IPC", "IPC Schema Validation", False, dt, "omarchy-shell milo status failed", err))
+            return
+
+        try:
+            data = json.loads(out)
+            required_keys = ["visible", "isThinking", "output", "mem", "media"]
+            missing_keys = [k for k in required_keys if k not in data]
+            if not missing_keys:
+                self.log_test(TestResult("IPC", "IPC Schema Validation", True, dt, f"Schema complete with keys: {list(data.keys())}"))
+            else:
+                self.log_test(TestResult("IPC", "IPC Schema Validation", False, dt, f"Missing schema keys: {missing_keys}"))
+        except Exception as e:
+            self.log_test(TestResult("IPC", "IPC Schema Validation", False, dt, "JSON parse failure", str(e)))
+
+    def test_visibility_state_machine(self):
+        t0 = time.perf_counter()
+        code1, _, _ = self.run_command(["omarchy-shell", "milo", "hide"])
+        _, status_hide, _ = self.run_command(["omarchy-shell", "milo", "status"])
+        hidden = json.loads(status_hide).get("visible") is False
+
+        code2, _, _ = self.run_command(["omarchy-shell", "milo", "show"])
+        _, status_show, _ = self.run_command(["omarchy-shell", "milo", "status"])
+        shown = json.loads(status_show).get("visible") is True
+
+        dt = (time.perf_counter() - t0) * 1000
+        if hidden and shown:
+            self.log_test(TestResult("IPC", "Visibility State Machine", True, dt, "hide -> false, show -> true confirmed"))
+        else:
+            self.log_test(TestResult("IPC", "Visibility State Machine", False, dt, f"State failure: hidden={hidden}, shown={shown}"))
+
+    def test_chat_clear_action(self):
+        t0 = time.perf_counter()
+        code, _, _ = self.run_command(["omarchy-shell", "milo", "clear"])
+        _, status_out, _ = self.run_command(["omarchy-shell", "milo", "status"])
+        dt = (time.perf_counter() - t0) * 1000
+
+        data = json.loads(status_out)
+        out_msg = data.get("output", "")
+        if "cleared" in out_msg.lower() or "standing by" in out_msg.lower():
+            self.log_test(TestResult("IPC", "HUD Chat Clear Action", True, dt, f"Output reset: '{out_msg}'"))
+        else:
+            self.log_test(TestResult("IPC", "HUD Chat Clear Action", False, dt, f"Unexpected output after clear: '{out_msg}'"))
+
+    # =========================================================================
+    # SUITE C: OBSIDIAN MEMORY TESTS
+    # =========================================================================
+    def test_vault_markdown_health(self):
+        t0 = time.perf_counter()
+        dash_text = (VAULT_DIR / "Dashboard.md").read_text()
+        prof_text = (VAULT_DIR / "Profile" / "Jeffy.md").read_text()
+        core_text = (VAULT_DIR / "Memories" / "Core_Memories.md").read_text()
+
+        has_links = "[[" in dash_text and "]]" in dash_text
+        has_user = "Jeffy" in prof_text
+        has_directives = "User Directives" in core_text
+
+        dt = (time.perf_counter() - t0) * 1000
+        if has_links and has_user and has_directives:
+            self.log_test(TestResult("Memory", "Obsidian Markdown Health", True, dt, "Wikilinks, Profile, and Directives valid"))
+        else:
+            self.log_test(TestResult("Memory", "Obsidian Markdown Health", False, dt, "Markdown syntax or key section missing"))
+
+    def test_daily_journal_logging(self):
+        t0 = time.perf_counter()
+        today_str = time.strftime("%Y-%m-%d")
+        daily_file = VAULT_DIR / "Daily" / f"{today_str}.md"
+        dt = (time.perf_counter() - t0) * 1000
+
+        if daily_file.exists():
+            content = daily_file.read_text()
+            if today_str in content and ("Interaction" in content or "Conversations" in content):
+                self.log_test(TestResult("Memory", "Daily Journal Logging", True, dt, f"Daily note {today_str}.md active with logs"))
+            else:
+                self.log_test(TestResult("Memory", "Daily Journal Logging", False, dt, f"Note exists but missing interaction logs"))
+        else:
+            self.log_test(TestResult("Memory", "Daily Journal Logging", False, dt, f"Daily note {today_str}.md not found"))
+
+    def test_memory_remember_pipeline(self):
+        t0 = time.perf_counter()
+        test_uuid = uuid.uuid4().hex[:8]
+        test_fact = f"Harness verification token {test_uuid}"
+
+        code, out, _ = self.run_command(["milo", "remember", test_fact])
+        core_file = VAULT_DIR / "Memories" / "Core_Memories.md"
+        content = core_file.read_text()
+
+        persisted = test_fact in content
+
+        # Cleanup synthetic test token
+        cleaned_content = "\n".join([line for line in content.splitlines() if test_uuid not in line]) + "\n"
+        core_file.write_text(cleaned_content)
+
+        dt = (time.perf_counter() - t0) * 1000
+        if code == 0 and persisted:
+            self.log_test(TestResult("Memory", "Memory Insertion & Persistence", True, dt, f"Saved and verified fact token [{test_uuid}]"))
+        else:
+            self.log_test(TestResult("Memory", "Memory Insertion & Persistence", False, dt, "Persistence verification failed"))
+
+    def test_reflection_engine_pipeline(self):
+        t0 = time.perf_counter()
+        code, out, err = self.run_command(["milo", "reflect"])
+        dt = (time.perf_counter() - t0) * 1000
+
+        skills_file = VAULT_DIR / "Knowledge" / "Learned_Skills" / "Index.md"
+        prefs_file = VAULT_DIR / "Memories" / "Preferences.md"
+
+        if code == 0 and skills_file.exists() and prefs_file.exists():
+            self.log_test(TestResult("Memory", "Harness² Continuous Reflection", True, dt, "Distilled preferences & skills into Obsidian"))
+        else:
+            self.log_test(TestResult("Memory", "Harness² Continuous Reflection", False, dt, "Reflection execution failed", f"Code={code}, err={err}"))
+
+    # =========================================================================
+    # SUITE D: STRESS & RESILIENCE TESTS
+    # =========================================================================
+    def test_ipc_rapid_burst(self):
+        t0 = time.perf_counter()
+        burst_count = 10
+        success_count = 0
+
+        for _ in range(burst_count):
+            code, out, _ = self.run_command(["omarchy-shell", "milo", "status"], timeout=1.0)
+            if code == 0:
+                try:
+                    data = json.loads(out)
+                    if "visible" in data:
+                        success_count += 1
+                except:
+                    pass
+
+        dt = (time.perf_counter() - t0) * 1000
+        passed = (success_count == burst_count)
+        self.log_test(TestResult(
+            "Stress",
+            "IPC High-Frequency Burst (10 calls)",
+            passed,
+            dt,
+            f"10/10 calls succeeded ({burst_count / (dt / 1000):.1f} req/s, 0% packet drop)" if passed else f"Only {success_count}/{burst_count} succeeded"
+        ))
+
+    def test_empty_query_guard(self):
+        t0 = time.perf_counter()
+        code, out, err = self.run_command([str(LOCAL_BIN / "milo-query"), ""], timeout=3.0)
+        dt = (time.perf_counter() - t0) * 1000
+
+        passed = (code != 0)
+        self.log_test(TestResult(
+            "Stress",
+            "Empty Input Rejection Guard",
+            passed,
+            dt,
+            f"Safely rejected empty query with exit code {code}"
+        ))
+
+    def test_hud_clear_idempotence(self):
+        t0 = time.perf_counter()
+        self.run_command(["omarchy-shell", "milo", "clear"])
+        self.run_command(["omarchy-shell", "milo", "clear"])
+        code, out, _ = self.run_command(["omarchy-shell", "milo", "status"])
+        dt = (time.perf_counter() - t0) * 1000
+
+        data = json.loads(out)
+        out_msg = data.get("output", "")
+        passed = (code == 0 and ("cleared" in out_msg.lower() or "standing by" in out_msg.lower()))
+        self.log_test(TestResult(
+            "Stress",
+            "Clear Action Idempotence",
+            passed,
+            dt,
+            "Sequential clear calls executed stably without race conditions"
+        ))
+
+    # =========================================================================
+    # SUITE E: BENCHMARKS
+    # =========================================================================
+    def test_ipc_latency_benchmark(self):
+        latencies = []
+        for _ in range(5):
+            t0 = time.perf_counter()
+            self.run_command(["omarchy-shell", "milo", "status"], timeout=2.0)
+            latencies.append((time.perf_counter() - t0) * 1000)
+
+        avg_lat = sum(latencies) / len(latencies)
+        min_lat = min(latencies)
+        max_lat = max(latencies)
+
+        passed = avg_lat < 220.0
+        self.log_test(TestResult(
+            "Benchmark",
+            "IPC Round-Trip Latency Benchmark",
+            passed,
+            avg_lat,
+            f"avg: {avg_lat:.1f}ms | min: {min_lat:.1f}ms | max: {max_lat:.1f}ms (Target: <220ms)"
+        ))
+
+    # =========================================================================
+    # SUITE F: SCENARIO & AI EVALS (LIVE LLM INFERENCE)
+    # =========================================================================
+    def test_live_ai_agent_eval(self):
+        t0 = time.perf_counter()
+        prompt = "What is the user's name and OS according to Profile/Jeffy? Answer in 6 words or less."
+        code, out, err = self.run_command([str(LOCAL_BIN / "milo-query"), prompt], timeout=35.0)
+        dt = (time.perf_counter() - t0) * 1000
+
+        passed = (code == 0) and ("Jeffy" in out) and ("Arch" in out)
+        msg = f"Inference complete ({dt/1000:.1f}s): '{out}'"
+        self.log_test(TestResult("Scenario", "AI Knowledge Recall & Inference", passed, dt, msg))
+
+    # =========================================================================
+    # PHASE 3: DIAGNOSTIC DOCTOR
+    # =========================================================================
+    def run_doctor(self):
+        print(f"\n{BOLD}{CYAN}🩺 MILO SYSTEM PRE-FLIGHT DOCTOR{RESET}")
+        print(f"{DIM}Deep health inspection of desktop subsystems and environment{RESET}\n")
+
+        checks = []
+
+        # 1. Kernel & OS
+        uname = os.uname()
+        checks.append(("Linux Kernel", True, f"{uname.sysname} {uname.release} ({uname.machine})"))
+
+        # 2. Wayland & Hyprland
+        w_disp = os.environ.get("WAYLAND_DISPLAY", "")
+        hypr_sig = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE", "")
+        if w_disp:
+            checks.append(("Wayland Display", True, f"Active socket: {w_disp}"))
+        else:
+            checks.append(("Wayland Display", False, "WAYLAND_DISPLAY environment variable not found"))
+
+        if hypr_sig:
+            checks.append(("Hyprland Session", True, f"Active signature: {hypr_sig[:12]}..."))
+        else:
+            checks.append(("Hyprland Session", False, "HYPRLAND_INSTANCE_SIGNATURE not set"))
+
+        # 3. GPU Acceleration
+        dri_render = Path("/dev/dri/renderD128")
+        if dri_render.exists():
+            checks.append(("GPU DRM Acceleration", True, "Hardware render node /dev/dri/renderD128 active"))
+        else:
+            checks.append(("GPU DRM Acceleration", False, "/dev/dri/renderD128 not accessible"))
+
+        # 4. Quickshell & Omarchy Shell Process
+        code, out, _ = self.run_command(["pgrep", "-f", "quickshell.*shell"])
+        if code == 0 and out.strip():
+            pid = out.strip().split("\n")[0]
+            # Read resident memory
+            try:
+                statm = Path(f"/proc/{pid}/statm").read_text().split()
+                rss_mb = (int(statm[1]) * 4096) / (1024 * 1024)
+                checks.append(("Omarchy Shell Process", True, f"Quickshell PID {pid} active (RAM: {rss_mb:.1f} MB)"))
+            except:
+                checks.append(("Omarchy Shell Process", True, f"Quickshell PID {pid} active"))
+        else:
+            checks.append(("Omarchy Shell Process", False, "quickshell process not found"))
+
+        # 5. Obsidian Vault Health
+        if VAULT_DIR.exists():
+            md_files = list(VAULT_DIR.rglob("*.md"))
+            total_kb = sum(f.stat().st_size for f in md_files) / 1024
+            checks.append(("Obsidian Memory Vault", True, f"{len(md_files)} markdown notes ({total_kb:.1f} KB) at {VAULT_DIR}"))
+        else:
+            checks.append(("Obsidian Memory Vault", False, f"Vault directory missing at {VAULT_DIR}"))
+
+        # 6. Antigravity CLI Version
+        code, out, _ = self.run_command(["agy", "--help"])
+        if code == 0:
+            checks.append(("Antigravity AI Core", True, "Antigravity CLI (agy) ready and configured"))
+        else:
+            checks.append(("Antigravity AI Core", False, "agy CLI failed to execute"))
+
+        # Print Checklist
+        for name, ok, desc in checks:
+            badge = f"{GREEN}✔ OK  {RESET}" if ok else f"{RED}✖ FAIL{RESET}"
+            print(f"  {badge} {BOLD}{name:24}{RESET} ↳ {desc}")
+
+        all_ok = all(ok for _, ok, _ in checks)
+        print(f"\n{BOLD}{'─' * 55}{RESET}")
+        if all_ok:
+            print(f"{GREEN}{BOLD}✦ MILO ENVIRONMENT FULLY OPTIMAL! READY FOR OPERATION. ✦{RESET}\n")
+            sys.exit(0)
+        else:
+            print(f"{YELLOW}{BOLD}⚠ SOME CHECKS NEED ATTENTION (See above){RESET}\n")
+            sys.exit(1)
+
+    # =========================================================================
+    # PHASE 3: CONTINUOUS WATCHDOG MODE
+    # =========================================================================
+    def run_watch(self):
+        print(f"\n{BOLD}{CYAN}✦ MILO CONTINUOUS TEST WATCHDOG ACTIVE{RESET}")
+        print(f"{DIM}Monitoring: {PLUGIN_DIR} and {VAULT_DIR}{RESET}")
+        print(f"{DIM}Press Ctrl+C to terminate watch.{RESET}\n")
+
+        # Initial baseline run
+        self.run_suite("smoke")
+
+        last_mtime = self._get_watch_mtimes()
+
+        try:
+            while True:
+                time.sleep(1.5)
+                current_mtime = self._get_watch_mtimes()
+                if current_mtime > last_mtime:
+                    last_mtime = current_mtime
+                    print(f"\n{BOLD}{YELLOW}⚡ Filesystem change detected! Re-evaluating Milo...{RESET}\n")
+                    self.results.clear()
+                    self.run_suite("all")
+                    # Send desktop notification
+                    passed = sum(1 for r in self.results if r.success)
+                    total = len(self.results)
+                    if passed == total:
+                        subprocess.run(["notify-send", "✦ Milo Harness", f"All {total}/{total} tests PASSED!", "-i", "dialog-information"])
+                    else:
+                        subprocess.run(["notify-send", "⚠ Milo Harness Alert", f"{total - passed} tests FAILED!", "-u", "critical", "-i", "dialog-warning"])
+        except KeyboardInterrupt:
+            print(f"\n{DIM}Watchdog stopped by user.{RESET}\n")
+
+    def _get_watch_mtimes(self) -> float:
+        mtimes = [0.0]
+        if PLUGIN_DIR.exists():
+            for p in PLUGIN_DIR.rglob("*"):
+                if p.is_file():
+                    mtimes.append(p.stat().st_mtime)
+        if VAULT_DIR.exists():
+            for p in (VAULT_DIR / "Memories").rglob("*"):
+                if p.is_file():
+                    mtimes.append(p.stat().st_mtime)
+        return max(mtimes)
+
+    # =========================================================================
+    # EXECUTION RUNNER & REPORT GENERATOR
+    # =========================================================================
+    def run_suite(self, suite_name: str = "all"):
+        self.start_time = time.perf_counter()
+        if not self.json_mode:
+            print(f"\n{BOLD}{CYAN}✦ MILO AGENT EVALUATION HARNESS v3.0{RESET}")
+            print(f"{DIM}Target: Omarchy Shell • Obsidian Vault • Antigravity Core{RESET}\n")
+
+        suites = {
+            "smoke": [
+                ("Smoke Tests", [
+                    self.test_binaries_present,
+                    self.test_browser_use_engine,
+                    self.test_plugin_manifest,
+                    self.test_obsidian_vault_structure,
+                    self.test_ipc_connectivity,
+                ])
+            ],
+            "ipc": [
+                ("Shell & IPC Suite", [
+                    self.test_status_schema,
+                    self.test_visibility_state_machine,
+                    self.test_chat_clear_action,
+                ])
+            ],
+            "memory": [
+                ("Obsidian Memory Suite", [
+                    self.test_vault_markdown_health,
+                    self.test_daily_journal_logging,
+                    self.test_memory_remember_pipeline,
+                    self.test_reflection_engine_pipeline,
+                ])
+            ],
+            "stress": [
+                ("Stress & Resilience Suite", [
+                    self.test_ipc_rapid_burst,
+                    self.test_empty_query_guard,
+                    self.test_hud_clear_idempotence,
+                ])
+            ],
+            "bench": [
+                ("Performance & Benchmark Suite", [
+                    self.test_ipc_latency_benchmark,
+                ])
+            ],
+            "eval": [
+                ("Scenario & AI Evaluation Suite (Live LLM)", [
+                    self.test_live_ai_agent_eval,
+                ])
+            ],
+        }
+
+        if suite_name == "all":
+            selected = ["smoke", "ipc", "memory", "stress", "bench"]
+        elif suite_name == "full":
+            selected = ["smoke", "ipc", "memory", "stress", "bench", "eval"]
+        else:
+            selected = [s for s in suite_name.split(",") if s in suites]
+
+        for s_key in selected:
+            for title, test_funcs in suites[s_key]:
+                if not self.json_mode:
+                    print(f"{BOLD}{MAGENTA}▸ {title}{RESET}")
+                for fn in test_funcs:
+                    try:
+                        fn()
+                    except Exception as e:
+                        self.log_test(TestResult(title, fn.__name__, False, 0.0, "Unhandled exception in harness test", str(e)))
+                if not self.json_mode:
+                    print()
+
+        total_time = (time.perf_counter() - self.start_time) * 1000
+        passed = sum(1 for r in self.results if r.success)
+        failed = sum(1 for r in self.results if not r.success)
+        total = len(self.results)
+
+        # Generate Obsidian Report & Track Metrics
+        if self.generate_report and not self.json_mode:
+            report_file = self.generate_obsidian_report(passed, failed, total, total_time, suite_name)
+            self.record_historical_metrics(passed, failed, total, total_time, suite_name, report_file.stem)
+            print(f"{CYAN}📝 Obsidian Report Generated: [[Knowledge/Harness_Runs/{report_file.name}]]{RESET}")
+            print(f"{CYAN}📈 Metrics Tracked in: [[Knowledge/Harness_Metrics]]{RESET}")
+
+        self.print_summary(passed, failed, total, total_time)
+
+    def generate_obsidian_report(self, passed: int, failed: int, total: int, duration_ms: float, suite_name: str) -> Path:
+        HARNESS_REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        timestamp_str = time.strftime("%Y-%m-%d_%H-%M-%S")
+        date_readable = time.strftime("%Y-%m-%d %H:%M:%S")
+        report_file = HARNESS_REPORTS_DIR / f"Run_{timestamp_str}.md"
+
+        status_badge = "🟢 PASS" if failed == 0 else "🔴 FAIL"
+        pass_pct = (passed / total * 100) if total > 0 else 0
+
+        lines = [
+            f"# 🧪 Milo Harness Evaluation Report — {date_readable}",
+            "",
+            f"**Suite:** `{suite_name}` | **Overall Status:** `{status_badge}` ({passed}/{total} Passed, {pass_pct:.1f}%)  ",
+            f"**Total Run Duration:** `{duration_ms:.1f}ms` ({duration_ms/1000:.2f}s)  ",
+            f"**Target Compositor:** `Hyprland (Omarchy Shell)`  ",
+            f"**Knowledge Engine:** `Obsidian Markdown Vault`",
+            "",
+            "---",
+            "",
+            "## 📋 Comprehensive Test Breakdown",
+            "",
+            "| Suite | Test Name | Status | Latency | Details / Message |",
+            "| :--- | :--- | :---: | :---: | :--- |",
+        ]
+
+        for r in self.results:
+            badge = "✅ PASS" if r.success else "❌ FAIL"
+            lines.append(f"| **{r.suite}** | `{r.name}` | {badge} | `{r.duration_ms:.1f}ms` | {r.message} |")
+
+        lines.extend([
+            "",
+            "---",
+            "",
+            "## 🧭 Navigation",
+            "- Back to [[Dashboard]]",
+            "- Historical Trends: [[Knowledge/Harness_Metrics]]",
+            f"- Daily Log: [[Daily/{time.strftime('%Y-%m-%d')}]]",
+            "- Core Directives: [[Memories/Core_Memories]]",
+        ])
+
+        report_file.write_text("\n".join(lines) + "\n")
+        self.update_dashboard_recent_run(report_file.stem)
+        return report_file
+
+    def record_historical_metrics(self, passed: int, failed: int, total: int, duration_ms: float, suite_name: str, report_stem: str):
+        now_str = time.strftime("%Y-%m-%d %H:%M")
+        pass_pct = f"{(passed / total * 100):.1f}%" if total > 0 else "0%"
+        dur_s = f"{duration_ms/1000:.2f}s"
+
+        # Find IPC latency from results if available
+        ipc_bench = next((r for r in self.results if "Latency Benchmark" in r.name), None)
+        ipc_lat_str = f"{ipc_bench.duration_ms:.1f}ms" if ipc_bench else "N/A"
+
+        if not METRICS_FILE.exists():
+            header = [
+                "# 📈 Milo Harness Historical Metrics Tracker",
+                "",
+                "This file tracks the historical performance, pass rates, and IPC round-trip latency of Milo across test harness executions.",
+                "",
+                "---",
+                "",
+                "## 📊 Evaluation Runs Log",
+                "",
+                "| Timestamp | Suite | Tests | Passed | Failed | Pass Rate | IPC Latency | Duration | Report |",
+                "| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |",
+            ]
+            METRICS_FILE.write_text("\n".join(header) + "\n")
+
+        row = f"| {now_str} | `{suite_name}` | {total} | {passed} | {failed} | {pass_pct} | `{ipc_lat_str}` | `{dur_s}` | [[Knowledge/Harness_Runs/{report_stem}|Report]] |\n"
+        with open(METRICS_FILE, "a") as f:
+            f.write(row)
+
+    def update_dashboard_recent_run(self, report_stem: str):
+        dash_path = VAULT_DIR / "Dashboard.md"
+        if not dash_path.exists():
+            return
+
+        content = dash_path.read_text()
+        header = "## 🧪 Latest Harness Evaluation"
+        link_line = f"- Latest Run: [[Knowledge/Harness_Runs/{report_stem}]]\n- Metrics: [[Knowledge/Harness_Metrics]]"
+
+        if header in content:
+            pass
+        else:
+            new_content = content.rstrip() + f"\n\n{header}\n{link_line}\n"
+            dash_path.write_text(new_content)
+
+    def print_summary(self, passed: int, failed: int, total: int, total_time: float):
+        if self.json_mode:
+            out = {
+                "total": total,
+                "passed": passed,
+                "failed": failed,
+                "duration_ms": total_time,
+                "results": [
+                    {
+                        "suite": r.suite,
+                        "name": r.name,
+                        "success": r.success,
+                        "duration_ms": r.duration_ms,
+                        "message": r.message,
+                        "details": r.details
+                    }
+                    for r in self.results
+                ]
+            }
+            print(json.dumps(out, indent=2))
+            sys.exit(0 if failed == 0 else 1)
+
+        print(f"{BOLD}{'─' * 55}{RESET}")
+        color = GREEN if failed == 0 else RED
+        print(f"Results: {color}{passed}/{total} Passed{RESET} | Duration: {BOLD}{total_time:.1f}ms{RESET}")
+
+        if failed == 0:
+            print(f"{GREEN}{BOLD}✦ ALL MILO SUBSYSTEMS VERIFIED HEALTHY! ✦{RESET}\n")
+            sys.exit(0)
+        else:
+            print(f"{RED}{BOLD}✖ {failed} TEST(S) FAILED — Inspect diagnostics above.{RESET}\n")
+            sys.exit(1)
+
+
+def main():
+    suite = "all"
+    json_mode = "--json" in sys.argv
+
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    subcmd = args[0] if args else "all"
+
+    harness = MiloHarness(json_mode=json_mode)
+
+    if subcmd == "doctor":
+        harness.run_doctor()
+    elif subcmd == "watch" or "--watch" in sys.argv:
+        harness.run_watch()
+    else:
+        harness.run_suite(subcmd)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,16 @@
+[Unit]
+Description=Milo WhatsApp Bidirectional Webhook Bridge Daemon
+After=network.target milo-openwa.service
+Wants=milo-openwa.service
+
+[Service]
+Type=simple
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -u /home/jeffy/.local/share/milo/wa_bridge.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,13 @@
+[Unit]
+Description=Milo LiveKit WebRTC Real-Time Media Server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/home/jeffy/.local/bin/livekit-server --config /home/jeffy/.local/share/milo/voice/livekit.yaml
+Restart=always
+RestartSec=3
+LimitNOFILE=65535
+
+[Install]
+WantedBy=default.target

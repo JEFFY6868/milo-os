@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+# Milo AI Desktop Companion CLI (Native Omarchy Shell + Obsidian Edition)
+set -eo pipefail
+
+VAULT_DIR="${HOME}/Documents/Obsidian/Milo"
+CMD="${1:-}"
+
+case "$CMD" in
+  toggle|wallpaper)
+    omarchy-shell milo toggle
+    ;;
+  show)
+    omarchy-shell milo show
+    ;;
+  hide)
+    omarchy-shell milo hide
+    ;;
+  clear)
+    omarchy-shell milo clear
+    ;;
+  status)
+    omarchy-shell milo status | jq . 2>/dev/null || omarchy-shell milo status
+    ;;
+  reflect|learn)
+    exec milo-reflect "$@"
+    ;;
+  test|harness)
+    shift
+    exec milo-harness "$@"
+    ;;
+  doctor)
+    exec milo-harness doctor
+    ;;
+  browse|web)
+    shift
+    exec milo-browser "$@"
+    ;;
+  wa|whatsapp)
+    shift
+    exec milo-wa "$@"
+    ;;
+  call)
+    shift
+    exec milo-call "$@"
+    ;;
+  app|call-app)
+    shift
+    exec /home/jeffy/.local/bin/milo-call-app "$@"
+    ;;
+  remote|tunnel)
+    shift
+    exec /home/jeffy/.local/bin/milo-remote "$@"
+    ;;
+  voice)
+    shift
+    systemctl --user start milo-livekit.service >/dev/null 2>&1
+    systemctl --user start milo-kino-studio.service >/dev/null 2>&1
+    echo "🎙️ Launching Milo LiveKit Voice Studio..."
+    echo "  ● LiveKit Server: ws://127.0.0.1:7880"
+    echo "  ● Voice Portal: http://127.0.0.1:3140"
+    exec /home/jeffy/.local/bin/kino-app voice "$@"
+    ;;
+  studio)
+    shift
+    exec milo-kino studio "$@"
+    ;;
+  kino|cinema|story)
+    shift
+    exec milo-kino "$@"
+    ;;
+  vault|memory|notes)
+    echo "✦ Opening Milo Obsidian Memory Vault (${VAULT_DIR})..."
+    hyprctl dispatch 'hl.dsp.exec_cmd("obsidian")' 2>/dev/null || gtk-launch obsidian || obsidian &
+    ;;
+  remember)
+    shift
+    FACT="$*"
+    if [[ -z "$FACT" ]]; then
+      echo "Usage: milo remember <fact or preference>" >&2
+      exit 1
+    fi
+    mkdir -p "${VAULT_DIR}/Memories"
+    echo "- $(date +'%Y-%m-%d %H:%M'): ${FACT}" >> "${VAULT_DIR}/Memories/Core_Memories.md"
+    echo "✦ Core memory saved to Obsidian: ${FACT}"
+    omarchy-shell milo clear >/dev/null 2>&1 || true
+    ;;
+  nightlight)
+    omarchy-shell milo nightlight
+    ;;
+  screenshot|snip)
+    omarchy-shell milo screenshot
+    ;;
+  ask)
+    shift
+    QUERY="$*"
+    if [[ -z "$QUERY" ]]; then
+      echo "Usage: milo ask <your prompt>" >&2
+      exit 1
+    fi
+    echo "✦ Milo is thinking..."
+    omarchy-shell milo ask "$QUERY" >/dev/null
+    # Poll for completion if running interactively
+    if [[ -t 1 ]]; then
+      sleep 1.5
+      while true; do
+        STATUS=$(omarchy-shell milo status 2>/dev/null || echo '{"isThinking":false}')
+        THINKING=$(echo "$STATUS" | jq -r '.isThinking // false' 2>/dev/null)
+        if [[ "$THINKING" == "false" ]]; then
+          echo -e "\n✦ Milo:"
+          echo "$STATUS" | jq -r '.output'
+          break
+        fi
+        sleep 1
+      done
+    fi
+    ;;
+  --daemon)
+    # Autostart daemon compatibility: ensure shell plugin is enabled
+    omarchy plugin enable jeffy.milo >/dev/null 2>&1 || true
+    ;;
+  *)
+    if [[ -n "$*" ]]; then
+      # If user typed `milo "hello"`, treat as `milo ask`
+      exec "$0" ask "$@"
+    else
+      cat <<EOF
+Milo AI Desktop Companion (Native Omarchy Shell + Obsidian Edition)
+
+Usage:
+  milo <query>         Ask Milo a question (e.g. milo "what did we do today?")
+  milo ask <query>     Ask Milo a question (updates desktop HUD & prints response)
+  milo reflect         Run Harness² reflection engine to distill memories & skills
+  milo browse <task>   Autonomous web agent via browser-use (e.g. milo browse "Find X")
+  milo wa [cmd]        WhatsApp Gateway interface (status, qr, send, bridge, dashboard)
+  milo kino [cmd]      Kino Cinema Subagent (project, idea, character, doctor, shotlist)
+  milo call [msg]      Call your phone on WhatsApp (PTT Voice Note) & LiveKit Room
+  milo app             Launch Milo Live Call App on desktop (Super + C)
+  milo tunnel          Start Worldwide HTTPS public tunnel for anywhere access
+  milo remote          Manage Tailscale & remote connections for Milo
+  milo voice           Launch LiveKit WebRTC Voice Studio (full-duplex talk)
+  milo test [suite]    Run Milo Evaluation Harness (smoke, ipc, memory, stress, bench, eval, all)
+  milo test watch      Run continuous test watchdog monitoring vault & plugins
+  milo doctor          Run pre-flight diagnostic system health inspector
+  milo remember <fact> Save a permanent fact into Milo's Obsidian memory vault
+  milo vault           Open Obsidian directly to Milo's neural knowledge base
+  milo toggle          Show / hide the desktop wallpaper HUD (Super+A / Super+D)
+  milo clear           Clear current conversation on the desktop
+  milo status          Print real-time HUD telemetry & status
+  milo nightlight      Toggle warm night light
+  milo snip            Take interactive screenshot
+
+Obsidian Vault:
+  ${VAULT_DIR} (Symlink: ~/MiloMemory)
+
+EOF
+    fi
+    ;;
+esac

@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KINO — AI Director's Studio & Screenplay Architecture</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            noir: {
+              950: '#08090d',
+              900: '#0d0f17',
+              850: '#121520',
+              800: '#181c2a',
+              700: '#23293d',
+              600: '#343e5c',
+            },
+            cinema: {
+              gold: '#f59e0b',
+              amber: '#d97706',
+              cyan: '#06b6d4',
+              red: '#ef4444',
+            }
+          },
+          fontFamily: {
+            screenplay: ['"Courier Prime"', 'Courier', 'monospace'],
+            sans: ['"Plus Jakarta Sans"', 'Inter', 'system-ui', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+  <!-- Google Fonts: Courier Prime & Plus Jakarta Sans -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Marked.js for markdown rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- LiveKit Client SDK -->
+  <script src="/static/livekit-client.umd.min.js"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="bg-noir-950 text-slate-200 min-h-screen flex flex-col font-sans selection:bg-amber-500/30 selection:text-amber-200">
+
+  <!-- Top Director's Navigation Bar -->
+  <header class="border-b border-white/10 bg-noir-900/80 backdrop-blur-md sticky top-0 z-50 px-6 py-3 flex items-center justify-between">
+    <!-- Brand & Project Switcher -->
+    <div class="flex items-center space-x-6">
+      <div class="flex items-center space-x-3 cursor-pointer" onclick="switchTab('corkboard')">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-amber-700 flex items-center justify-center shadow-lg shadow-amber-500/20 border border-amber-400/30">
+          <i data-lucide="clapperboard" class="w-5 h-5 text-noir-950 font-bold"></i>
+        </div>
+        <div>
+          <div class="flex items-center space-x-2">
+            <span class="font-extrabold tracking-wider text-white text-lg font-mono">KINO</span>
+            <span class="text-[10px] tracking-widest uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-semibold border border-amber-500/30">STUDIO</span>
+          </div>
+          <p class="text-xs text-slate-400">Director's AI Co-Pilot & Screenplay Suite</p>
+        </div>
+      </div>
+
+      <div class="h-6 w-px bg-white/10"></div>
+
+      <!-- Project Picker -->
+      <div class="flex items-center space-x-2">
+        <span class="text-xs text-slate-400 flex items-center gap-1 font-medium"><i data-lucide="folder-git-2" class="w-3.5 h-3.5 text-amber-400"></i> Project:</span>
+        <select id="projectSelect" class="bg-noir-800 text-sm font-semibold text-white px-3 py-1.5 rounded-lg border border-white/10 focus:outline-none focus:border-amber-400 cursor-pointer">
+          <option value="project_mirage">Project Mirage (Active)</option>
+        </select>
+        <button onclick="openNewProjectModal()" class="p-1.5 rounded-lg bg-noir-800 hover:bg-noir-700 text-slate-300 hover:text-white border border-white/10 transition" title="New Film Project">
+          <i data-lucide="plus" class="w-4 h-4"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Center Navigation Tabs -->
+    <nav class="flex items-center space-x-1 bg-noir-950/80 p-1 rounded-xl border border-white/10">
+      <button onclick="switchTab('corkboard')" id="tab-corkboard" class="nav-tab active flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition">
+        <i data-lucide="layout-grid" class="w-4 h-4 text-amber-400"></i>
+        <span>Beat Corkboard</span>
+      </button>
+      <button onclick="switchTab('screenplay')" id="tab-screenplay" class="nav-tab flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium text-slate-400 hover:text-white transition">
+        <i data-lucide="scroll-text" class="w-4 h-4 text-amber-400"></i>
+        <span>Screenplay Studio</span>
+      </button>
+      <button onclick="switchTab('shotlist')" id="tab-shotlist" class="nav-tab flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium text-slate-400 hover:text-white transition">
+        <i data-lucide="camera" class="w-4 h-4 text-amber-400"></i>
+        <span>Shot Division</span>
+      </button>
+      <button onclick="switchTab('characters')" id="tab-characters" class="nav-tab flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium text-slate-400 hover:text-white transition">
+        <i data-lucide="users" class="w-4 h-4 text-amber-400"></i>
+        <span>Character Bibles</span>
+      </button>
+      <button onclick="switchTab('ideas')" id="tab-ideas" class="nav-tab flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium text-slate-400 hover:text-white transition">
+        <i data-lucide="sparkles" class="w-4 h-4 text-amber-400"></i>
+        <span>Idea Lab</span>
+      </button>
+      <button onclick="switchTab('voice')" id="tab-voice" class="nav-tab flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium text-slate-400 hover:text-white transition">
+        <i data-lucide="mic" class="w-4 h-4 text-amber-400"></i>
+        <span>LiveKit Voice</span>
+      </button>
+    </nav>
+
+    <!-- Right Controls & Sync Status -->
+    <div class="flex items-center space-x-4">
+      <!-- Obsidian Live Vault Indicator -->
+      <div class="flex items-center space-x-2 px-3 py-1.5 rounded-full bg-emerald-950/50 border border-emerald-500/30 text-emerald-400 text-xs font-mono">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span>Obsidian Vault Linked</span>
+      </div>
+
+      <button onclick="exportScript()" class="flex items-center space-x-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-noir-950 px-3.5 py-1.5 rounded-lg text-xs font-bold transition shadow-lg shadow-amber-500/20">
+        <i data-lucide="download" class="w-4 h-4"></i>
+        <span>Export Script</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Workstation View Area -->
+  <main class="flex-1 p-6 overflow-y-auto max-w-[1720px] w-full mx-auto">
+
+    <!-- ========================================================================= -->
+    <!-- VIEW 1: BEAT CORKBOARD (THE WRITER'S ROOM) -->
+    <!-- ========================================================================= -->
+    <section id="view-corkboard" class="space-y-6">
+      <!-- Banner / Logline Summary -->
+      <div class="bg-noir-900 border border-white/10 rounded-2xl p-6 relative overflow-hidden backdrop-blur-xl">
+        <div class="absolute right-0 top-0 w-96 h-96 bg-amber-500/5 rounded-full blur-3xl pointer-events-none"></div>
+        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div class="space-y-2">
+            <div class="flex items-center space-x-3">
+              <span class="px-2.5 py-1 rounded bg-amber-500/20 text-amber-400 font-mono text-xs font-semibold border border-amber-500/30">FEATURE FILM</span>
+              <h1 id="projectTitleDisplay" class="text-2xl font-bold text-white tracking-tight">Project Mirage: Dhuruva</h1>
+              <span class="text-xs text-slate-400">• Neo-Noir Investigative Thriller</span>
+            </div>
+            <p id="projectLoglineDisplay" class="text-sm text-slate-300 max-w-4xl italic leading-relaxed">
+              "An undercover intelligence specialist loses his short-term memory after a sabotaged ambush in Mumbai, forced to reconstruct the last 72 hours before the rogue syndicate he infiltrated triggers a synchronized blackout."
+            </p>
+          </div>
+          <div class="flex items-center space-x-3">
+            <button onclick="triggerQuickDoctor()" class="flex items-center space-x-2 bg-noir-800 hover:bg-noir-700 text-amber-400 border border-amber-500/30 px-4 py-2 rounded-xl text-sm font-semibold transition">
+              <i data-lucide="stethoscope" class="w-4 h-4"></i>
+              <span>Pacing Doctor</span>
+            </button>
+            <button onclick="openNewSceneModal()" class="flex items-center space-x-2 bg-amber-500 hover:bg-amber-400 text-noir-950 px-4 py-2 rounded-xl text-sm font-bold transition shadow-lg shadow-amber-500/20">
+              <i data-lucide="plus-circle" class="w-4 h-4"></i>
+              <span>Add Beat Card</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3-Act Columns Grid -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+        <!-- ACT 1 COLUMN -->
+        <div class="bg-noir-900/60 border border-white/10 rounded-2xl p-4 flex flex-col space-y-4">
+          <div class="flex items-center justify-between pb-3 border-b border-white/10">
+            <div class="flex items-center space-x-2">
+              <span class="w-3 h-3 rounded-full bg-cyan-400"></span>
+              <h2 class="font-bold text-sm tracking-wider uppercase text-cyan-300 font-mono">Act 1: The Setup & Hook</h2>
+            </div>
+            <span class="text-xs font-mono text-slate-400">00 — 30 Min</span>
+          </div>
+
+          <div class="space-y-3.5 flex-1" id="act1-cards">
+            <!-- Beat Card 1 -->
+            <div class="beat-card bg-noir-850 hover:bg-noir-800 border border-white/10 hover:border-cyan-500/50 rounded-xl p-4 transition-all duration-200 cursor-pointer shadow-md group" onclick="loadSceneToEditor(1)">
+              <div class="flex items-center justify-between text-xs font-mono text-slate-400 mb-2">
+                <span class="text-cyan-400 font-bold">SCENE 01 • EXT. PIER - NIGHT</span>
+                <span class="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Tension: 8/10</span>
+              </div>
+              <h3 class="font-bold text-white text-base mb-1.5 group-hover:text-cyan-300 transition">The Rain Ambush</h3>
+              <p class="text-xs text-slate-300 leading-relaxed line-clamp-2">
+                Vikram wakes up gasping under a submerged shipping container. Blood flows down his forehead into saltwater. His weapon is empty; his partner's dog tags hang around his wrist.
+              </p>
+              <div class="mt-3 pt-3 border-t border-white/5 flex items-center justify-between text-[11px] text-slate-400">
+                <span class="flex items-center gap-1"><i data-lucide="user" class="w-3 h-3 text-cyan-400"></i> Vikram</span>
+                <span class="text-slate-400 hover:text-white flex items-center gap-1"><i data-lucide="arrow-right" class="w-3 h-3"></i> Open Scene</span>
+              </div>
+            </div>
+
+            <!-- Beat Card 2 -->
+            <div class="beat-card bg-noir-850 hover:bg-noir-800 border border-white/10 hover:border-cyan-500/50 rounded-xl p-4 transition-all duration-200 cursor-pointer shadow-md group" onclick="loadSceneToEditor(2)">
+              <div class="flex items-center justify-between text-xs font-mono text-slate-400 mb-2">
+                <span class="text-cyan-400 font-bold">SCENE 02 • INT. SAFE HOUSE</span>
+                <span class="px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">Tension: 6.5/10</span>
+              </div>
+              <h3 class="font-bold text-white text-base mb-1.5 group-hover:text-cyan-300 transition">The Burner Phone Signal</h3>
+              <p class="text-xs text-slate-300 leading-relaxed line-clamp-2">
+                A dead phone rings with an encrypted transmission from the Bureau chief ordering his immediate liquidation as a suspected double agent.
+              </p>
+              <div class="mt-3 pt-3 border-t border-white/5 flex items-center justify-between text-[11px] text-slate-400">
+                <span class="flex items-center gap-1"><i data-lucide="user" class="w-3 h-3 text-cyan-400"></i> Vikram, Chief Menon</span>
+                <span class="text-slate-400 hover:text-white flex items-center gap-1"><i data-lucide="arrow-right" class="w-3 h-3"></i> Open Scene</span>
+              </div>
+            </div>
+
+            <!-- Beat Card 3 -->
+            <div class="beat-card bg-noir-850 hover:bg-noir-800 border border-white/10 hover:border-cyan-500/50 rounded-xl p-4 transition-all duration-200 cursor-pointer shadow-md group" onclick="loadSceneToEditor(3)">
+              <div class="flex items-center justify-between text-xs font-mono text-slate-400 mb-2">
+                <span class="text-cyan-400 font-bold">SCENE 03 • PLOT POINT 1</span>
+                <span class="px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20">Tension: 9/10</span>
+              </div>
+              <h3 class="font-bold text-white text-base mb-1.5 group-hover:text-cyan-300 transition">Crossing The Threshold</h3>
+              <p class="text-xs text-slate-300 leading-relaxed line-clamp-2">
+                Vikram burns his agency ID and commits to hunting both the mole inside intelligence and the syndicate head. Point of no return.
+              </p>
+              <div class="mt-3 pt-3 border-t border-white/5 flex items-center justify-between text-[11px] text-slate-400">
+                <span class="flex items-center gap-1"><i data-lucide="zap" class="w-3 h-3 text-amber-400"></i> Inciting Climax</span>
+                <span class="text-slate-400 hover:text-white flex items-center gap-1"><i data-lucide="arrow-right" class="w-3 h-3"></i> Open Scene</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ACT 2 COLUMN -->
+        <div class="bg-noir-900/60 border border-white/10 rounded-2xl p-4 flex flex-col space-y-4">
+          <div class="flex items-center justify-between pb-3 border-b border-white/10">
+            <div class="flex items-center space-x-2">
+              <span class="w-3 h-3 rounded-full bg-amber-400"></span>
+              <h2 class="font-bold text-sm tracking-wider uppercase text-amber-300 font-mono">Act 2: Conflict & Midpoint Turn</h2>
+            </div>
+            <span class="text-xs font-mono text-slate-400">30 — 85 Min</span>
+          </div>
+
+          <div class="space-y-3.5 flex-1" id="act2-cards">
+            <!-- Beat Card 4 -->
+            <div class="beat-card bg-noir-850 hover:bg-noir-800 border border-white/10 hover:border-amber-500/50 rounded-xl p-4 transition-all duration-200 cursor-pointer shadow-md group" onclick="loadSceneToEditor(4)">
+              <div class="flex items-center justify-between text-xs font-mono text-slate-400 mb-2">
+                <span class="text-amber-400 font-bold">SCENE 04 • INT. METRO TUNNEL</span>
+                <span class="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Tension: 7.5/10</span>
+              </div>
+              <h3 class="font-bold text-white text-base mb-1.5 group-hover:text-amber-300 transition">The Shadow Interrogation</h3>
+              <p class="text-xs text-slate-300 leading-relaxed line-clamp-2">
+                Vikram corners Rudra in an idling metro train car. Rudra reveals that Vikram himself formulated the syndicate's escape route before his amnesia.
+              </p>
+              <div class="mt-3 pt-3 border-t border-white/5 flex items-center justify-between text-[11px] text-slate-400">
+                <span class="flex items-center gap-1"><i data-lucide="user" class="w-3 h-3 text-amber-400"></i> Vikram, Rudra</span>
+                <span class="text-slate-400 hover:text-white flex items-center gap-1"><i data-lucide="arrow-right" class="w-3 h-3"></i> Open Scene</span>
+              </div>
+            </div>
+
+            <!-- Beat Card 5 -->
+            <div class="beat-card bg-noir-850 hover:bg-noir-800 border border-white/10 hover:border-amber-500/50 rounded-xl p-4 transition-all duration-200 cursor-pointer shadow-md group" onclick="loadSceneToEditor(5)">
+              <div class="flex items-center justify-between text-xs font-mono text-slate-400 mb-2">
+                <span class="text-amber-400 font-bold">SCENE 05 • MIDPOINT HIGH</span>
+                <span class="px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20">Tension: 9.5/10</span>
+              </div>
+              <h3 class="font-bold text-white text-base mb-1.5 group-hover:text-amber-300 transition">The City Hall Blackout</h3>
+              <p class="text-xs text-slate-300 leading-relaxed line-clamp-2">
+                The false victory turns to catastrophe. Power cuts across South Mumbai; SWAT teams surround Vikram instead of the syndicate target.
+              </p>
+              <div class="mt-3 pt-3 border-t border-white/5 flex items-center justify-between text-[11px] text-slate-400">
+                <span class="flex items-center gap-1"><i data-lucide="flame" class="w-3 h-3 text-rose-400"></i> Midpoint Climax</span>
+                <span class="text-slate-400 hover:text-white flex items-center gap-1"><i data-lucide="arrow-right" class="w-3 h-3"></i> Open Scene</span>
+              </div>
+            </div>
+
+            <!-- Beat Card 6 -->
+            <div class="beat-card bg-noir-850 hover:bg-noir-800 border border-white/10 hover:border-amber-500/50 rounded-xl p-4 transition-all duration-200 cursor-pointer shadow-md group" onclick="loadSceneToEditor(6)">
+              <div class="flex items-center justify-between text-xs font-mono text-slate-400 mb-2">
+                <span class="text-amber-400 font-bold">SCENE 06 • DARK NIGHT</span>
+                <span class="px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">Tension: 8.5/10</span>
+              </div>
+              <h3 class="font-bold text-white text-base mb-1.5 group-hover:text-amber-300 transition">All Allies Lost</h3>
+              <p class="text-xs text-slate-300 leading-relaxed line-clamp-2">
+                Wounded and cornered in an old dock crane cabin. Meera's transmission goes silent. Vikram realizes the memory loss was medically induced by himself.
+              </p>
+              <div class="mt-3 pt-3 border-t border-white/5 flex items-center justify-between text-[11px] text-slate-400">
+                <span class="flex items-center gap-1"><i data-lucide="moon" class="w-3 h-3 text-slate-400"></i> Dark Night of Soul</span>
+                <span class="text-slate-400 hover:text-white flex items-center gap-1"><i data-lucide="arrow-right" class="w-3 h-3"></i> Open Scene</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ACT 3 COLUMN -->
+        <div class="bg-noir-900/60 border border-white/10 rounded-2xl p-4 flex flex-col space-y-4">
+          <div class="flex items-center justify-between pb-3 border-b border-white/10">
+            <div class="flex items-center space-x-2">
+              <span class="w-3 h-3 rounded-full bg-rose-500"></span>
+              <h2 class="font-bold text-sm tracking-wider uppercase text-rose-400 font-mono">Act 3: Climax & Catharsis</h2>
+            </div>
+            <span class="text-xs font-mono text-slate-400">85 — 120 Min</span>
+          </div>
+
+          <div class="space-y-3.5 flex-1" id="act3-cards">
+            <!-- Beat Card 7 -->
+            <div class="beat-card bg-noir-850 hover:bg-noir-800 border border-white/10 hover:border-rose-500/50 rounded-xl p-4 transition-all duration-200 cursor-pointer shadow-md group" onclick="loadSceneToEditor(7)">
+              <div class="flex items-center justify-between text-xs font-mono text-slate-400 mb-2">
+                <span class="text-rose-400 font-bold">SCENE 07 • THE BREAKTHROUGH</span>
+                <span class="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Tension: 8.8/10</span>
+              </div>
+              <h3 class="font-bold text-white text-base mb-1.5 group-hover:text-rose-300 transition">The Trigger Audio Tape</h3>
+              <p class="text-xs text-slate-300 leading-relaxed line-clamp-2">
+                Vikram plays back a concealed micro-cassette he hid inside his service firearm before the memory wipe. His own voice guides his final tactical strike.
+              </p>
+              <div class="mt-3 pt-3 border-t border-white/5 flex items-center justify-between text-[11px] text-slate-400">
+                <span class="flex items-center gap-1"><i data-lucide="key" class="w-3 h-3 text-amber-400"></i> Narrative Key</span>
+                <span class="text-slate-400 hover:text-white flex items-center gap-1"><i data-lucide="arrow-right" class="w-3 h-3"></i> Open Scene</span>
+              </div>
+            </div>
+
+            <!-- Beat Card 8 -->
+            <div class="beat-card bg-noir-850 hover:bg-noir-800 border border-white/10 hover:border-rose-500/50 rounded-xl p-4 transition-all duration-200 cursor-pointer shadow-md group" onclick="loadSceneToEditor(8)">
+              <div class="flex items-center justify-between text-xs font-mono text-slate-400 mb-2">
+                <span class="text-rose-400 font-bold">SCENE 08 • THE GRAND CLIMAX</span>
+                <span class="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">Tension: 10/10</span>
+              </div>
+              <h3 class="font-bold text-white text-base mb-1.5 group-hover:text-rose-300 transition">Dock 14 Showdown</h3>
+              <p class="text-xs text-slate-300 leading-relaxed line-clamp-2">
+                Vikram confronts Chief Menon and Rudra simultaneously in torrential downpour. Philosophical confrontation on law vs justice ends in devastating sacrifice.
+              </p>
+              <div class="mt-3 pt-3 border-t border-white/5 flex items-center justify-between text-[11px] text-slate-400">
+                <span class="flex items-center gap-1"><i data-lucide="crosshair" class="w-3 h-3 text-rose-500"></i> Climax Duel</span>
+                <span class="text-slate-400 hover:text-white flex items-center gap-1"><i data-lucide="arrow-right" class="w-3 h-3"></i> Open Scene</span>
+              </div>
+            </div>
+
+            <!-- Beat Card 9 -->
+            <div class="beat-card bg-noir-850 hover:bg-noir-800 border border-white/10 hover:border-rose-500/50 rounded-xl p-4 transition-all duration-200 cursor-pointer shadow-md group" onclick="loadSceneToEditor(9)">
+              <div class="flex items-center justify-between text-xs font-mono text-slate-400 mb-2">
+                <span class="text-rose-400 font-bold">SCENE 09 • FINAL IMAGE</span>
+                <span class="px-2 py-0.5 rounded bg-slate-500/10 text-slate-400 border border-slate-500/20">Tension: 4/10</span>
+              </div>
+              <h3 class="font-bold text-white text-base mb-1.5 group-hover:text-rose-300 transition">Dawn Over The Harbor</h3>
+              <p class="text-xs text-slate-300 leading-relaxed line-clamp-2">
+                Sunlight breaks through storm clouds over Mumbai harbor. Vikram walks away into the morning crowd, nameless and untraceable.
+              </p>
+              <div class="mt-3 pt-3 border-t border-white/5 flex items-center justify-between text-[11px] text-slate-400">
+                <span class="flex items-center gap-1"><i data-lucide="sun" class="w-3 h-3 text-amber-400"></i> Moral Resolution</span>
+                <span class="text-slate-400 hover:text-white flex items-center gap-1"><i data-lucide="arrow-right" class="w-3 h-3"></i> Open Scene</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+
+    <!-- ========================================================================= -->
+    <!-- VIEW 2: SCREENPLAY STUDIO (DUAL-PANE EDITOR + AI SCRIPT DOCTOR) -->
+    <!-- ========================================================================= -->
+    <section id="view-screenplay" class="hidden space-y-6">
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[780px]">
+
+        <!-- LEFT PANE: SCREENPLAY EDITOR (7 Cols) -->
+        <div class="lg:col-span-7 bg-noir-900 border border-white/10 rounded-2xl flex flex-col overflow-hidden shadow-2xl">
+          <!-- Editor Toolbar -->
+          <div class="bg-noir-850 px-4 py-3 border-b border-white/10 flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center space-x-1.5">
+              <span class="text-xs font-mono text-amber-400 font-bold mr-2 uppercase flex items-center gap-1">
+                <i data-lucide="edit-3" class="w-3.5 h-3.5"></i> Screenplay
+              </span>
+              <button onclick="insertScreenplayTag('INT. ')" class="px-2.5 py-1 rounded bg-noir-800 hover:bg-noir-700 text-xs text-slate-300 hover:text-white border border-white/5 font-mono">SCENE</button>
+              <button onclick="insertScreenplayTag('ACTION: ')" class="px-2.5 py-1 rounded bg-noir-800 hover:bg-noir-700 text-xs text-slate-300 hover:text-white border border-white/5 font-mono">ACTION</button>
+              <button onclick="insertScreenplayTag('CHARACTER\n')" class="px-2.5 py-1 rounded bg-noir-800 hover:bg-noir-700 text-xs text-slate-300 hover:text-white border border-white/5 font-mono">CHARACTER</button>
+              <button onclick="insertScreenplayTag('(parenthetical)\n')" class="px-2.5 py-1 rounded bg-noir-800 hover:bg-noir-700 text-xs text-slate-300 hover:text-white border border-white/5 font-mono">(PAREN)</button>
+              <button onclick="insertScreenplayTag('CUT TO:\n')" class="px-2.5 py-1 rounded bg-noir-800 hover:bg-noir-700 text-xs text-slate-300 hover:text-white border border-white/5 font-mono">TRANSITION</button>
+            </div>
+            <div class="flex items-center space-x-2">
+              <button onclick="saveCurrentScript()" class="flex items-center space-x-1.5 bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded-lg text-xs font-semibold transition">
+                <i data-lucide="save" class="w-3.5 h-3.5"></i>
+                <span>Save to Vault</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Screenplay Canvas -->
+          <div class="flex-1 p-6 bg-[#0c0e14] overflow-y-auto">
+            <textarea id="screenplayEditor" class="w-full h-full min-h-[620px] bg-transparent text-slate-100 font-screenplay text-sm leading-relaxed tracking-wide resize-none focus:outline-none focus:ring-0 selection:bg-amber-500/30" spellcheck="false">
+INT. DERELICT DOCK WAREHOUSE - NIGHT
+
+Rain hammers the rusted corrugated roof like shrapnel. Steam billows from fractured boiler conduits.
+
+VIKRAM (38) stands motionless behind a row of wooden shipping crates. His left shoulder is soaked in dark red; a Glock 19 rests in his palm. His knuckles are white with tension.
+
+Across the waterlogged concrete expanse, RUDRA (45) stands in the single beam of halogen floodlight. He takes a slow drag from a battered silver cigarette case.
+
+RUDRA
+(flicking ash into the puddles)
+You are twenty minutes early, Vikram. In our line of work, eager men usually end up floating face-down before dawn.
+
+Vikram steps out from the shadows. The slide of his weapon stays parallel to the floor.
+
+VIKRAM
+Where is the second drive, Rudra?
+
+RUDRA
+(smiles, shaking his head)
+Still asking schoolboy questions. You think the Bureau wanted you to survive tonight? Look up at the gantry, officer. 
+
+Vikram does not look up. But a solitary red laser diode glides across his chest, locking directly over his heart.
+            </textarea>
+          </div>
+        </div>
+
+        <!-- RIGHT PANE: KINO SCRIPT DOCTOR & DIRECTORIAL NOTES (5 Cols) -->
+        <div class="lg:col-span-5 bg-noir-900 border border-white/10 rounded-2xl flex flex-col overflow-hidden shadow-2xl">
+          <!-- Doctor Header -->
+          <div class="bg-noir-850 px-5 py-3 border-b border-white/10 flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+              <div class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping"></div>
+              <span class="text-sm font-bold text-white flex items-center gap-1.5">
+                <i data-lucide="stethoscope" class="w-4 h-4 text-amber-400"></i> Kino Script Doctor
+              </span>
+            </div>
+            <button onclick="runDoctorOnCurrentScript()" id="doctorAnalyzeBtn" class="flex items-center space-x-1.5 bg-amber-500 hover:bg-amber-400 text-noir-950 px-3 py-1 rounded-lg text-xs font-bold transition shadow-md shadow-amber-500/20">
+              <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+              <span>Re-Analyze Scene</span>
+            </button>
+          </div>
+
+          <!-- Doctor Diagnosis Feed -->
+          <div class="flex-1 p-5 overflow-y-auto space-y-4" id="doctorOutputArea">
+            <!-- Tension Gauge Card -->
+            <div class="bg-noir-850 border border-white/10 rounded-xl p-4">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-xs font-mono uppercase tracking-wider text-slate-400">Scene Tension Meter</span>
+                <span class="text-lg font-mono font-extrabold text-amber-400">8.8 / 10</span>
+              </div>
+              <div class="w-full bg-noir-950 rounded-full h-2.5 overflow-hidden border border-white/10">
+                <div class="bg-gradient-to-r from-amber-500 via-rose-500 to-red-600 h-2.5 rounded-full" style="width: 88%"></div>
+              </div>
+              <p class="text-[11px] text-slate-400 mt-2 font-sans">
+                High dramatic tension. Pacing is crisp with physical anchoring (rain, boiler steam, laser diode).
+              </p>
+            </div>
+
+            <!-- Subtext vs Exposition Audit -->
+            <div class="bg-noir-850 border border-amber-500/30 rounded-xl p-4">
+              <div class="flex items-center space-x-2 text-xs font-bold text-amber-400 uppercase tracking-wide mb-2">
+                <i data-lucide="alert-triangle" class="w-4 h-4 text-amber-400"></i>
+                <span>Subtext vs Exposition Check</span>
+              </div>
+              <p class="text-xs text-slate-300 leading-relaxed">
+                <strong class="text-white">Diagnosis:</strong> Rudra's line <code class="text-amber-300 font-mono text-[11px]">"You think the Bureau wanted you to survive tonight?"</code> is slightly too expository. 
+              </p>
+              <div class="mt-2.5 p-2.5 bg-noir-900 rounded-lg border border-white/5 text-xs text-slate-300">
+                <span class="text-amber-400 font-semibold">Kino Fix:</span> Cut the rhetorical question. Make Rudra pull out a government seal badge with Vikram's own signature, tossing it into the rain puddle. Let the visual object deliver the betrayal punch.
+              </div>
+            </div>
+
+            <!-- 3 Directorial Fixes -->
+            <div class="bg-noir-850 border border-white/10 rounded-xl p-4 space-y-2.5">
+              <span class="text-xs font-bold text-cyan-400 uppercase tracking-wide flex items-center gap-1.5">
+                <i data-lucide="video" class="w-4 h-4 text-cyan-400"></i> Directorial Staging Enhancements
+              </span>
+              <ul class="text-xs text-slate-300 space-y-2">
+                <li class="flex items-start gap-2">
+                  <span class="font-mono text-cyan-400 font-bold">1.</span>
+                  <span><strong>Audio Isolation:</strong> Fade out all ambient rain foley the instant the laser locks on Vikram's chest. Dead silence for 2 seconds.</span>
+                </li>
+                <li class="flex items-start gap-2">
+                  <span class="font-mono text-cyan-400 font-bold">2.</span>
+                  <span><strong>Lens Perspective:</strong> Extreme Low Angle (28mm) on Vikram to emphasize his refusal to look up at the gantry sniper.</span>
+                </li>
+                <li class="flex items-start gap-2">
+                  <span class="font-mono text-cyan-400 font-bold">3.</span>
+                  <span><strong>Twist Layer:</strong> Vikram reveals he already knew about the sniper; he stepped into the light intentionally to triangulate the gantry position.</span>
+                </li>
+              </ul>
+            </div>
+
+            <!-- Quick Kino Co-Pilot Input -->
+            <div class="bg-noir-850 border border-white/10 rounded-xl p-3.5 space-y-2">
+              <span class="text-xs font-semibold text-slate-300">Ask Kino Directorial Guidance:</span>
+              <div class="flex items-center space-x-2">
+                <input id="kinoPromptInput" type="text" placeholder="e.g. Make dialogue sharper, suggest unexpected weapon switch..." class="flex-1 bg-noir-950 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-amber-400">
+                <button onclick="askKinoCustom()" class="bg-amber-500 hover:bg-amber-400 text-noir-950 p-2 rounded-lg text-xs font-bold transition">
+                  <i data-lucide="send" class="w-3.5 h-3.5"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+
+    <!-- ========================================================================= -->
+    <!-- VIEW 3: DIRECTOR'S SHOT DIVISION (VISUAL STORYBOARD) -->
+    <!-- ========================================================================= -->
+    <section id="view-shotlist" class="hidden space-y-6">
+      <div class="bg-noir-900 border border-white/10 rounded-2xl p-6">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+          <div>
+            <h2 class="text-xl font-bold text-white flex items-center gap-2">
+              <i data-lucide="camera" class="w-5 h-5 text-amber-400"></i> Director's Visual Shot Division
+            </h2>
+            <p class="text-xs text-slate-400">Camera Framing, Movement, Lighting Mood, and Sound Design Cues</p>
+          </div>
+          <button onclick="openGenerateShotlistModal()" class="flex items-center space-x-2 bg-amber-500 hover:bg-amber-400 text-noir-950 px-4 py-2 rounded-xl text-xs font-bold transition shadow-lg shadow-amber-500/20">
+            <i data-lucide="wand-2" class="w-4 h-4"></i>
+            <span>Generate Shot Division with Kino</span>
+          </button>
+        </div>
+
+        <!-- Shot Grid / Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <!-- Shot 1 -->
+          <div class="bg-noir-850 border border-white/10 rounded-xl p-4 flex flex-col space-y-3 hover:border-amber-500/40 transition">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-mono font-bold text-amber-400">SHOT 01</span>
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-noir-800 text-slate-300 border border-white/5">EXTREME WIDE</span>
+            </div>
+            <div class="h-28 rounded-lg bg-gradient-to-br from-slate-900 to-noir-950 border border-white/5 flex flex-col items-center justify-center p-3 text-center relative overflow-hidden group">
+              <i data-lucide="aperture" class="w-8 h-8 text-amber-400/40 mb-1 group-hover:scale-110 transition"></i>
+              <span class="text-[11px] font-mono text-slate-300">24mm Anamorphic • T2.0</span>
+              <span class="text-[10px] text-slate-400">Crane Down Through Rain</span>
+            </div>
+            <div class="space-y-1.5 text-xs text-slate-300">
+              <p><strong>Lighting:</strong> High contrast silhouette; single sodium vapor lamp reflection on black water.</p>
+              <p><strong>Sound:</strong> Heavy rhythmic rain, low drone sub-bass (40Hz).</p>
+            </div>
+          </div>
+
+          <!-- Shot 2 -->
+          <div class="bg-noir-850 border border-white/10 rounded-xl p-4 flex flex-col space-y-3 hover:border-amber-500/40 transition">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-mono font-bold text-amber-400">SHOT 02</span>
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-noir-800 text-slate-300 border border-white/5">MEDIUM TRACKING</span>
+            </div>
+            <div class="h-28 rounded-lg bg-gradient-to-br from-slate-900 to-noir-950 border border-white/5 flex flex-col items-center justify-center p-3 text-center relative overflow-hidden group">
+              <i data-lucide="move" class="w-8 h-8 text-cyan-400/40 mb-1 group-hover:scale-110 transition"></i>
+              <span class="text-[11px] font-mono text-slate-300">35mm Prime • T1.8</span>
+              <span class="text-[10px] text-slate-400">Steadicam Behind Shoulder</span>
+            </div>
+            <div class="space-y-1.5 text-xs text-slate-300">
+              <p><strong>Lighting:</strong> Cold cyan rim light along Vikram's wet trenchcoat.</p>
+              <p><strong>Sound:</strong> Sloshing footstep foley, breathing through gritted teeth.</p>
+            </div>
+          </div>
+
+          <!-- Shot 3 -->
+          <div class="bg-noir-850 border border-white/10 rounded-xl p-4 flex flex-col space-y-3 hover:border-amber-500/40 transition">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-mono font-bold text-amber-400">SHOT 03</span>
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-noir-800 text-slate-300 border border-white/5">EXTREME CLOSE-UP</span>
+            </div>
+            <div class="h-28 rounded-lg bg-gradient-to-br from-slate-900 to-noir-950 border border-white/5 flex flex-col items-center justify-center p-3 text-center relative overflow-hidden group">
+              <i data-lucide="eye" class="w-8 h-8 text-amber-400/40 mb-1 group-hover:scale-110 transition"></i>
+              <span class="text-[11px] font-mono text-slate-300">85mm Macro • T1.4</span>
+              <span class="text-[10px] text-slate-400">Static Slow Push</span>
+            </div>
+            <div class="space-y-1.5 text-xs text-slate-300">
+              <p><strong>Lighting:</strong> Warm amber match flare reflecting across Rudra's scarred eyebrow.</p>
+              <p><strong>Sound:</strong> Match strike sharp crack, cigarette sizzle.</p>
+            </div>
+          </div>
+
+          <!-- Shot 4 -->
+          <div class="bg-noir-850 border border-white/10 rounded-xl p-4 flex flex-col space-y-3 hover:border-amber-500/40 transition">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-mono font-bold text-amber-400">SHOT 04</span>
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-noir-800 text-slate-300 border border-white/5">DUTCH LOW ANGLE</span>
+            </div>
+            <div class="h-28 rounded-lg bg-gradient-to-br from-slate-900 to-noir-950 border border-white/5 flex flex-col items-center justify-center p-3 text-center relative overflow-hidden group">
+              <i data-lucide="crosshair" class="w-8 h-8 text-rose-500/40 mb-1 group-hover:scale-110 transition"></i>
+              <span class="text-[11px] font-mono text-slate-300">40mm Anamorphic</span>
+              <span class="text-[10px] text-slate-400">Handheld Micro-Tremors</span>
+            </div>
+            <div class="space-y-1.5 text-xs text-slate-300">
+              <p><strong>Lighting:</strong> Blood-red laser dot dancing over wet collarbone.</p>
+              <p><strong>Sound:</strong> Sudden absence of rain; sharp solitary metallic cock of handgun.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ========================================================================= -->
+    <!-- VIEW 4: CHARACTER BIBLES -->
+    <!-- ========================================================================= -->
+    <section id="view-characters" class="hidden space-y-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-xl font-bold text-white flex items-center gap-2">
+            <i data-lucide="users" class="w-5 h-5 text-amber-400"></i> Character Dossiers & Archetypes
+          </h2>
+          <p class="text-xs text-slate-400">Psychological Arcs, Want vs Need, Traumas, and Speech Patterns</p>
+        </div>
+        <button onclick="openNewCharacterModal()" class="flex items-center space-x-2 bg-amber-500 hover:bg-amber-400 text-noir-950 px-4 py-2 rounded-xl text-xs font-bold transition shadow-lg shadow-amber-500/20">
+          <i data-lucide="user-plus" class="w-4 h-4"></i>
+          <span>Create Character with Kino</span>
+        </button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6" id="characterCardsContainer">
+        <!-- Character 1: Vikram -->
+        <div class="bg-noir-900 border border-white/10 rounded-2xl p-5 hover:border-amber-500/40 transition flex flex-col space-y-4 shadow-xl">
+          <div class="flex items-start justify-between">
+            <div>
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 font-bold border border-cyan-500/20">PROTAGONIST</span>
+              <h3 class="text-lg font-bold text-white mt-1">ACP Vikram "Ghost"</h3>
+              <p class="text-xs text-slate-400">Intelligence Operative • Age 38</p>
+            </div>
+            <div class="w-10 h-10 rounded-full bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 font-bold">
+              V
+            </div>
+          </div>
+
+          <div class="space-y-2.5 text-xs text-slate-300">
+            <div>
+              <strong class="text-slate-400 uppercase text-[10px] tracking-wider block">Want vs Need:</strong>
+              <span>Wants to find the mole who erased his identity; Needs to forgive himself for letting his rookie partner die.</span>
+            </div>
+            <div>
+              <strong class="text-slate-400 uppercase text-[10px] tracking-wider block">The Ghost (Trauma):</strong>
+              <span>Authorized an unsanctioned raid 3 years ago that resulted in civilian casualties, leading him to accept suicide assignments.</span>
+            </div>
+            <div>
+              <strong class="text-slate-400 uppercase text-[10px] tracking-wider block">Fatal Flaw:</strong>
+              <span>Pathological distrust; isolates allies right when he needs collective leverage.</span>
+            </div>
+            <div>
+              <strong class="text-slate-400 uppercase text-[10px] tracking-wider block">Speech Rhythm:</strong>
+              <span>Monosyllabic, dry, razor-sharp. Never raises his voice; whispers under stress.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Character 2: Rudra -->
+        <div class="bg-noir-900 border border-white/10 rounded-2xl p-5 hover:border-rose-500/40 transition flex flex-col space-y-4 shadow-xl">
+          <div class="flex items-start justify-between">
+            <div>
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 font-bold border border-rose-500/20">ANTAGONIST / SHADOW</span>
+              <h3 class="text-lg font-bold text-white mt-1">Rudra (The Fixer)</h3>
+              <p class="text-xs text-slate-400">Syndicate Architect • Age 45</p>
+            </div>
+            <div class="w-10 h-10 rounded-full bg-rose-500/20 border border-rose-500/30 flex items-center justify-center text-rose-400 font-bold">
+              R
+            </div>
+          </div>
+
+          <div class="space-y-2.5 text-xs text-slate-300">
+            <div>
+              <strong class="text-slate-400 uppercase text-[10px] tracking-wider block">Want vs Need:</strong>
+              <span>Wants total leverage over state transit systems; Needs someone with equal intellect to acknowledge his philosophy.</span>
+            </div>
+            <div>
+              <strong class="text-slate-400 uppercase text-[10px] tracking-wider block">The Ghost (Trauma):</strong>
+              <span>Former top government cyber-intelligence officer who was framed and discarded during a regime change.</span>
+            </div>
+            <div>
+              <strong class="text-slate-400 uppercase text-[10px] tracking-wider block">Fatal Flaw:</strong>
+              <span>Intellectual arrogance. Loves to explain the aesthetic perfection of his traps to Vikram.</span>
+            </div>
+            <div>
+              <strong class="text-slate-400 uppercase text-[10px] tracking-wider block">Visual Motif:</strong>
+              <span>Vintage sterling silver cigarette case; never parts with it.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Character 3: Meera -->
+        <div class="bg-noir-900 border border-white/10 rounded-2xl p-5 hover:border-amber-500/40 transition flex flex-col space-y-4 shadow-xl">
+          <div class="flex items-start justify-between">
+            <div>
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 font-bold border border-amber-500/20">CATALYST / FOIL</span>
+              <h3 class="text-lg font-bold text-white mt-1">Dr. Meera Sen</h3>
+              <p class="text-xs text-slate-400">Forensic Neurologist • Age 34</p>
+            </div>
+            <div class="w-10 h-10 rounded-full bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 font-bold">
+              M
+            </div>
+          </div>
+
+          <div class="space-y-2.5 text-xs text-slate-300">
+            <div>
+              <strong class="text-slate-400 uppercase text-[10px] tracking-wider block">Want vs Need:</strong>
+              <span>Wants to scientifically document the neural suppression drug; Needs to realize some secrets cannot be published without bloodshed.</span>
+            </div>
+            <div>
+              <strong class="text-slate-400 uppercase text-[10px] tracking-wider block">The Ghost (Trauma):</strong>
+              <span>Her whistleblower brother vanished after uncovering illegal clinical trials.</span>
+            </div>
+            <div>
+              <strong class="text-slate-400 uppercase text-[10px] tracking-wider block">Speech Rhythm:</strong>
+              <span>Rapid-fire analytical logic; cuts through cop jargon with cold empirical data.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ========================================================================= -->
+    <!-- VIEW 5: IDEA & TREATMENT LAB -->
+    <!-- ========================================================================= -->
+    <section id="view-ideas" class="hidden space-y-6">
+      <div class="bg-noir-900 border border-white/10 rounded-2xl p-6">
+        <h2 class="text-xl font-bold text-white flex items-center gap-2 mb-2">
+          <i data-lucide="sparkles" class="w-5 h-5 text-amber-400"></i> Story Treatment & Concept Incubator
+        </h2>
+        <p class="text-xs text-slate-400 mb-6">Enter a one-line thought or premise. Kino will expand it into a high-concept film treatment.</p>
+
+        <!-- Idea Input Bar -->
+        <div class="flex flex-col sm:flex-row items-center gap-3 mb-8">
+          <input id="ideaInput" type="text" placeholder="e.g. A retired sniper discovers a live radio frequency transmitting assassinations 5 minutes before they happen..." class="w-full bg-noir-850 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-400">
+          <button onclick="developNewIdea()" id="developIdeaBtn" class="w-full sm:w-auto whitespace-nowrap bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-noir-950 px-6 py-3 rounded-xl text-sm font-bold transition shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2">
+            <i data-lucide="flame" class="w-4 h-4"></i>
+            <span>Develop Treatment</span>
+          </button>
+        </div>
+
+        <!-- Rendered Treatment Output -->
+        <div id="ideaOutputCard" class="bg-noir-850 border border-white/10 rounded-xl p-6 prose prose-invert max-w-none prose-amber prose-headings:font-bold">
+          <div class="text-slate-400 text-center py-8">
+            <i data-lucide="film" class="w-10 h-10 mx-auto mb-2 text-slate-600"></i>
+            <p>Your developed treatments from Obsidian vault will appear here.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================================= -->
+    <!-- VIEW 6: REAL-TIME VOICE STUDIO (LIVEKIT WEBRTC) -->
+    <!-- ========================================================================= -->
+    <section id="view-voice" class="hidden space-y-6">
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[700px]">
+
+        <!-- LEFT PANEL: THE VOICE ORB & CONTROLS (7 Cols) -->
+        <div class="lg:col-span-7 bg-noir-900 border border-white/10 rounded-2xl p-8 flex flex-col items-center justify-between shadow-2xl relative overflow-hidden">
+          <div class="absolute -top-24 -left-24 w-80 h-80 bg-amber-500/10 rounded-full blur-3xl pointer-events-none"></div>
+          <div class="absolute -bottom-24 -right-24 w-80 h-80 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+          <!-- Header Status -->
+          <div class="w-full flex items-center justify-between z-10 pb-4 border-b border-white/10">
+            <div class="flex items-center space-x-3">
+              <span class="w-3 h-3 rounded-full bg-emerald-400 animate-pulse"></span>
+              <div>
+                <h2 class="text-base font-bold text-white font-mono flex items-center gap-2">
+                  <i data-lucide="radio" class="w-4 h-4 text-amber-400"></i> LIVEKIT WEBRTC VOICE
+                </h2>
+                <span class="text-[11px] text-slate-400 font-mono">Server: ws://127.0.0.1:7880 • Full Duplex</span>
+              </div>
+            </div>
+            <div class="flex items-center space-x-2">
+              <span id="voiceLatencyTag" class="px-2.5 py-1 rounded bg-noir-800 text-slate-300 font-mono text-xs border border-white/10">Latency: ~28ms</span>
+            </div>
+          </div>
+
+          <!-- The Glowing Audio Orb Centerpiece -->
+          <div class="my-auto py-12 flex flex-col items-center justify-center text-center z-10">
+            <div id="voiceOrb" class="relative w-48 h-48 rounded-full bg-gradient-to-tr from-amber-600/20 via-amber-500/10 to-noir-850 border border-amber-500/30 flex items-center justify-center shadow-2xl shadow-amber-500/10 transition-all duration-300 group cursor-pointer" onclick="toggleVoiceCall()">
+              <div id="orbRing" class="absolute inset-0 rounded-full border border-amber-400/20 scale-110 animate-ping opacity-0"></div>
+              <div class="w-36 h-36 rounded-full bg-noir-900 border border-white/10 flex flex-col items-center justify-center space-y-2 group-hover:scale-105 transition">
+                <i id="voiceMicIcon" data-lucide="mic" class="w-12 h-12 text-amber-400"></i>
+                <span id="voiceOrbLabel" class="text-xs font-mono font-bold tracking-wider text-slate-300 uppercase">CONNECT</span>
+              </div>
+            </div>
+
+            <!-- Waveform visualizer bars -->
+            <div id="audioWaveBars" class="flex items-center justify-center space-x-1.5 mt-8 h-12">
+              <div class="wave-bar w-1 bg-amber-500/40 rounded-full h-3 transition-all duration-150"></div>
+              <div class="wave-bar w-1 bg-amber-500/60 rounded-full h-5 transition-all duration-150"></div>
+              <div class="wave-bar w-1 bg-amber-400 rounded-full h-8 transition-all duration-150"></div>
+              <div class="wave-bar w-1 bg-amber-500/80 rounded-full h-10 transition-all duration-150"></div>
+              <div class="wave-bar w-1 bg-amber-400 rounded-full h-6 transition-all duration-150"></div>
+              <div class="wave-bar w-1 bg-amber-500/60 rounded-full h-4 transition-all duration-150"></div>
+              <div class="wave-bar w-1 bg-amber-500/40 rounded-full h-2 transition-all duration-150"></div>
+            </div>
+
+            <p id="voiceStatusSubtext" class="text-xs text-slate-400 mt-4 max-w-sm">
+              Tap the orb to start live voice talk with Milo & Kino. Full conversational turn-taking with zero awkward pauses.
+            </p>
+          </div>
+
+          <!-- Bottom Voice Toolbar -->
+          <div class="w-full flex flex-wrap items-center justify-between gap-4 z-10 pt-4 border-t border-white/10">
+            <div class="flex items-center space-x-2">
+              <span class="text-xs text-slate-400 font-medium">Voice Model:</span>
+              <select id="voiceSelect" class="bg-noir-800 text-xs text-white px-3 py-1.5 rounded-lg border border-white/10 focus:outline-none focus:border-amber-400 cursor-pointer">
+                <option value="en-US-ChristopherNeural">Christopher (Director / Authority)</option>
+                <option value="en-IN-PrabhatNeural">Prabhat (Indian English Male)</option>
+                <option value="en-IN-NeerjaExpressiveNeural">Neerja (Indian English Female)</option>
+                <option value="ta-IN-ValluvarNeural">Valluvar (Tamil Male)</option>
+                <option value="ta-IN-PallaviNeural">Pallavi (Tamil Female)</option>
+              </select>
+            </div>
+
+            <div class="flex items-center space-x-3">
+              <button id="voiceMuteBtn" onclick="toggleMute()" class="px-3.5 py-1.5 rounded-xl bg-noir-800 hover:bg-noir-700 text-slate-300 text-xs font-semibold border border-white/10 flex items-center gap-1.5">
+                <i data-lucide="mic" class="w-3.5 h-3.5"></i>
+                <span id="muteBtnLabel">Mute</span>
+              </button>
+              <button id="voiceConnectBtn" onclick="toggleVoiceCall()" class="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-noir-950 text-xs font-bold transition shadow-lg shadow-amber-500/20 flex items-center gap-1.5">
+                <i data-lucide="phone-call" class="w-3.5 h-3.5"></i>
+                <span id="connectBtnLabel">Start Call</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT PANEL: LIVE TRANSCRIPT & QUICK PROMPTS (5 Cols) -->
+        <div class="lg:col-span-5 bg-noir-900 border border-white/10 rounded-2xl flex flex-col overflow-hidden shadow-2xl">
+          <div class="bg-noir-850 px-5 py-3.5 border-b border-white/10 flex items-center justify-between">
+            <span class="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+              <i data-lucide="message-square-text" class="w-4 h-4 text-amber-400"></i> Live Voice Transcript
+            </span>
+            <button onclick="clearVoiceTranscript()" class="text-[11px] text-slate-400 hover:text-white transition">Clear</button>
+          </div>
+
+          <!-- Transcript Scroll Area -->
+          <div id="voiceTranscriptArea" class="flex-1 p-5 overflow-y-auto space-y-3.5 min-h-[380px] text-xs">
+            <div class="p-3 rounded-xl bg-noir-850 border border-white/5 text-slate-300">
+              <span class="text-amber-400 font-bold font-mono text-[10px] block mb-1">MILO VOICE AI</span>
+              Ready to brainstorm, Jeffy. Ask anything about your scenes, characters, or daily schedule.
+            </div>
+          </div>
+
+          <!-- Fallback Text Query Input -->
+          <div class="p-4 bg-noir-850 border-t border-white/10 flex items-center space-x-2">
+            <input id="voiceTextInput" type="text" placeholder="Or type a spoken thought..." class="flex-1 bg-noir-950 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400" onkeydown="if(event.key==='Enter') sendManualVoiceQuery()">
+            <button onclick="sendManualVoiceQuery()" class="p-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-noir-950 transition">
+              <i data-lucide="send" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Modals -->
+  <!-- New Project Modal -->
+  <div id="newProjectModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-noir-900 border border-white/10 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+      <div class="flex items-center justify-between">
+        <h3 class="font-bold text-white text-lg flex items-center gap-2">
+          <i data-lucide="clapperboard" class="w-5 h-5 text-amber-400"></i> New Film Project
+        </h3>
+        <button onclick="closeModal('newProjectModal')" class="text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+      <input id="newProjectTitle" type="text" placeholder="Project Title (e.g. Kaalam, The Iron Grid)" class="w-full bg-noir-800 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-400">
+      <div class="flex justify-end space-x-3 pt-2">
+        <button onclick="closeModal('newProjectModal')" class="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white">Cancel</button>
+        <button onclick="submitNewProject()" class="bg-amber-500 hover:bg-amber-400 text-noir-950 px-4 py-2 rounded-xl text-xs font-bold transition">Initialize Project</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Lucide Script init & App JS -->
+  <script src="/static/app.js?v=2.2"></script>
+</body>
+</html>

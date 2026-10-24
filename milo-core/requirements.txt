@@ -1,0 +1,16 @@
+# Milo Core & Kino Cinema Studio Python Dependencies
+starlette>=0.36.0
+uvicorn[standard]>=0.28.0
+google-genai>=0.1.0
+edge-tts>=6.1.12
+websockets>=12.0
+python-multipart>=0.0.9
+aiofiles>=23.2.1
+livekit>=0.11.0
+livekit-api>=0.4.0
+requests>=2.31.0
+playwright>=1.42.0
+browser-use>=0.1.0
+pillow>=10.2.0
+pydantic>=2.6.0
+python-dotenv>=1.0.0

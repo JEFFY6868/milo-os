@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Milo Kino Cinema Subagent Wrapper
+set -eo pipefail
+
+KINO_PY="${HOME}/.local/share/milo/kino/kino_agent.py"
+
+if [[ ! -f "$KINO_PY" ]]; then
+  echo "Error: Kino engine script not found at ${KINO_PY}" >&2
+  exit 1
+fi
+
+exec python3 "$KINO_PY" "$@"

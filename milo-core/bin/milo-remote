@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+"""
+Milo Remote Access & Tunnel Manager
+- Tailscale mesh VPN status & link generator
+- Instant Cloudflare HTTPS Worldwide Tunnel (zero-root / zero-config)
+"""
+
+import sys
+import os
+import re
+import time
+import json
+import shutil
+import subprocess
+import argparse
+from pathlib import Path
+
+STUDIO_PORT = 3140
+
+def get_tailscale_ip():
+    try:
+        res = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True, timeout=3)
+        if res.returncode == 0:
+            ip = res.stdout.strip()
+            if ip.startswith("100."):
+                return ip
+    except Exception:
+        pass
+    return None
+
+def check_tailscale_service():
+    try:
+        res = subprocess.run(["systemctl", "is-active", "tailscaled"], capture_output=True, text=True, timeout=2)
+        return res.stdout.strip() == "active"
+    except Exception:
+        return False
+
+def show_qr(url: str):
+    try:
+        subprocess.run(["qrencode", "-t", "ANSIUTF8", url])
+    except Exception:
+        pass
+
+def start_public_tunnel():
+    cf_bin = shutil.which("cloudflared") or str(Path.home() / ".local/bin/cloudflared")
+    if not os.path.exists(cf_bin):
+        print("❌ cloudflared binary not found.")
+        sys.exit(1)
+
+    print("═════════════════════════════════════════════════════════════════")
+    print(" 🌍 STARTING SECURE WORLDWIDE HTTPS TUNNEL...")
+    print("═════════════════════════════════════════════════════════════════")
+    print("  ● Target Service: Milo Call (http://127.0.0.1:3140)")
+    print("  ● Establishing encrypted Cloudflare Tunnel connection...")
+
+    proc = subprocess.Popen(
+        [cf_bin, "tunnel", "--url", f"http://127.0.0.1:{STUDIO_PORT}"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True
+    )
+
+    tunnel_url = None
+    start_time = time.time()
+
+    while time.time() - start_time < 20:
+        line = proc.stdout.readline()
+        if not line:
+            time.sleep(0.1)
+            continue
+        m = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", line)
+        if m:
+            tunnel_url = m.group(0)
+            break
+
+    if not tunnel_url:
+        print("❌ Could not obtain public tunnel URL. Check your internet connection.")
+        proc.kill()
+        sys.exit(1)
+
+    call_url = f"{tunnel_url}/call"
+    print("\n  ✔ TUNNEL ACTIVE & ACCESSIBLE FROM ANYWHERE ON EARTH!")
+    print(f"  🔗 Worldwide HTTPS URL: {call_url}")
+    print("  ● Scan this QR code on your phone to open instantly:\n")
+    
+    show_qr(call_url)
+
+    # Save artifact QR
+    artifact_qr = Path.home() / ".gemini/antigravity-cli/brain/52615d05-6883-4738-8b3a-cd3fa307e7c2/milo_call_tunnel_qr.png"
+    if artifact_qr.parent.exists():
+        subprocess.run(["qrencode", "-s", "10", "-o", str(artifact_qr), call_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    try:
+        subprocess.run([
+            "notify-send",
+            "-i", str(Path.home() / ".local/share/icons/kino.svg"),
+            "🌍 Milo Public Tunnel Active",
+            f"Access URL: {call_url}"
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+    print("\n[Tunnel is running in background. Press Ctrl+C to close]")
+    try:
+        proc.wait()
+    except KeyboardInterrupt:
+        proc.kill()
+        print("\n✦ Tunnel terminated.")
+
+def main():
+    parser = argparse.ArgumentParser(description="Milo Worldwide Remote Access Manager")
+    parser.add_argument("--public", "-p", action="store_true", help="Start instant Cloudflare HTTPS public tunnel")
+    parser.add_argument("--tailscale", "-t", action="store_true", help="Check Tailscale setup")
+    args = parser.parse_args()
+
+    if args.public:
+        start_public_tunnel()
+        return
+
+    ts_active = check_tailscale_service()
+    ts_ip = get_tailscale_ip()
+
+    print("═════════════════════════════════════════════════════════════════")
+    print(" 🌍 MILO WORLDWIDE ACCESS MANAGER (Tailscale & Public Tunnel)")
+    print("═════════════════════════════════════════════════════════════════")
+    
+    if ts_active and ts_ip:
+        ts_url = f"http://{ts_ip}:{STUDIO_PORT}/call"
+        print(f"  ✔ Tailscale Mesh VPN: ACTIVE")
+        print(f"  ● Your Tailscale IP: {ts_ip}")
+        print(f"  🔗 Private Access URL: {ts_url}")
+        print("  ● Scan to open on your Tailscale-connected Android phone:\n")
+        show_qr(ts_url)
+    else:
+        print("  ● Tailscale Status: Not currently connected or active.")
+        print("\n  To connect via Tailscale Mesh VPN:")
+        print("    1. Run in terminal: sudo pacman -S tailscale && sudo systemctl enable --now tailscaled")
+        print("    2. Run: sudo tailscale up")
+        print("    3. Install Tailscale app on your Android phone and login.")
+        print("\n  --- OR ---")
+        print("  To open an instant Worldwide HTTPS link RIGHT NOW (no root / no VPN app needed):")
+        print("    Run: milo remote --public  (or: milo tunnel)")
+    print("═════════════════════════════════════════════════════════════════")
+
+if __name__ == "__main__":
+    main()

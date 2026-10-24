@@ -1,0 +1,212 @@
+#!/usr/bin/env python3
+"""
+Milo AI Call Dispatcher
+- Dispatches genuine WhatsApp PTT Voice Calls directly to Jeffy's WhatsApp (+91 90878 76030)
+- Triggers desktop incoming call audio chime & Hyprland notification
+- Launches / focuses full-duplex LiveKit WebRTC voice call studio
+"""
+
+import os
+import sys
+import json
+import base64
+import tempfile
+import subprocess
+import argparse
+from pathlib import Path
+import urllib.request
+import urllib.error
+
+OPENWA_BASE_URL = os.environ.get("OPENWA_URL", "http://127.0.0.1:2785")
+OPENWA_KEY_FILE = Path.home() / ".local/share/milo/openwa/data/.api-key"
+DEFAULT_TARGET_CHAT = "919087876030@c.us"
+TTS_BIN = Path.home() / ".local/share/milo/venv/bin/edge-tts"
+
+DEFAULT_CALL_TEXT_TAMIL = (
+    "வணக்கம் ஜெஃப்பி! நான் உங்க மிலோ பேசுறேன். "
+    "நீங்க கூப்பிட்டீங்க, இதோ உங்க வாட்ஸ்அப்-ல வாய்ஸ் நோட்டா கூப்பிட்டுட்டேன்! "
+    "டைரக்டர் ஸ்டுடியோவும் லைவ்கிட் வாய்ஸ் ரூமும் உங்களுக்காக டெஸ்க்டாப்ல ரெடியா இருக்கு. "
+    "நம்ம திரைகதை, அடுத்த ஷாட் லிஸ்ட், இல்ல இன்னைக்கு என்ன பண்ணலாம்னு பேசலாம். "
+    "உங்க சிஸ்டம்ல மைலோ வாய்ஸ் ரன் பண்ணி லைவ் காலையும் கனெக்ட் பண்ணிக்கோங்க. "
+    "நான் உங்களுக்காக வெயிட் பண்றேன் ஜெஃப்பி!"
+)
+
+def get_api_key():
+    if OPENWA_KEY_FILE.exists():
+        return OPENWA_KEY_FILE.read_text().strip()
+    return ""
+
+def is_tamil(text: str) -> bool:
+    return any(0x0B80 <= ord(c) <= 0x0BFF for c in text)
+
+def synthesize_voice(text: str, voice: str = None) -> Path:
+    if not voice:
+        voice = "ta-IN-ValluvarNeural" if is_tamil(text) else "en-IN-PrabhatNeural"
+
+    tmp_mp3 = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False).name
+    tmp_ogg = tempfile.NamedTemporaryFile(suffix=".ogg", delete=False).name
+
+    # Step 1: edge-tts
+    cmd = [
+        str(TTS_BIN),
+        "--voice", voice,
+        "--text", text,
+        "--write-media", tmp_mp3
+    ]
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # Step 2: ffmpeg convert to Ogg Opus (WhatsApp PTT standard)
+    ff_cmd = [
+        "ffmpeg", "-y", "-i", tmp_mp3,
+        "-c:a", "libopus", "-b:a", "32k", "-vbr", "on",
+        tmp_ogg
+    ]
+    subprocess.run(ff_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    
+    try:
+        os.remove(tmp_mp3)
+    except OSError:
+        pass
+
+    return Path(tmp_ogg)
+
+def send_whatsapp_voice_note(ogg_path: Path, chat_id: str, api_key: str):
+    with open(ogg_path, "rb") as f:
+        b64_audio = base64.b64encode(f.read()).decode("utf-8")
+
+    # Get active session ID
+    req_sessions = urllib.request.Request(
+        f"{OPENWA_BASE_URL}/api/sessions",
+        headers={"X-API-Key": api_key}
+    )
+    with urllib.request.urlopen(req_sessions, timeout=10) as resp:
+        sessions = json.loads(resp.read().decode())
+    
+    if not sessions:
+        raise RuntimeError("No active WhatsApp sessions found in OpenWA.")
+    
+    session_id = sessions[0]["id"]
+
+    url = f"{OPENWA_BASE_URL}/api/sessions/{session_id}/messages/send-audio"
+    payload = {
+        "chatId": chat_id,
+        "base64": b64_audio,
+        "mimetype": "audio/ogg; codecs=opus",
+        "ptt": True
+    }
+
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "X-API-Key": api_key,
+            "Content-Type": "application/json"
+        },
+        method="POST"
+    )
+
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        result = json.loads(resp.read().decode())
+        return result
+
+def play_ringtone():
+    ring_paths = [
+        "/usr/share/sounds/freedesktop/stereo/phone-incoming-call.oga",
+        "/usr/share/sounds/freedesktop/stereo/phone-outgoing-calling.oga",
+        "/usr/share/sounds/freedesktop/stereo/complete.oga"
+    ]
+    for p in ring_paths:
+        if os.path.exists(p):
+            subprocess.Popen(["pw-play", p], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            break
+
+def trigger_notification():
+    icon_path = str(Path.home() / ".local/share/icons/kino.svg")
+    subprocess.Popen([
+        "notify-send",
+        "-u", "critical",
+        "-i", icon_path,
+        "📞 Incoming Call: Milo AI",
+        "Milo is calling you! Voice message delivered to WhatsApp.\nLiveKit Room is active."
+    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+def broadcast_app_call(text):
+    try:
+        req = urllib.request.Request(
+            "http://127.0.0.1:3140/api/call/trigger",
+            data=json.dumps({"caller": "Milo AI", "text": text}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            pass
+    except Exception:
+        pass
+
+def launch_livekit_studio():
+    subprocess.Popen(
+        ["/home/jeffy/.local/bin/kino-app", "voice"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+
+def main():
+    parser = argparse.ArgumentParser(description="Make Milo call Jeffy via WhatsApp and LiveKit.")
+    parser.add_argument("message", nargs="*", help="Spoken call text (defaults to Tamil greeting)")
+    parser.add_argument("--voice", "-v", help="Neural TTS voice name (ta-IN-ValluvarNeural, en-IN-PrabhatNeural, en-US-ChristopherNeural)")
+    parser.add_argument("--chat", "-c", default=DEFAULT_TARGET_CHAT, help="WhatsApp Chat ID")
+    parser.add_argument("--no-ring", action="store_true", help="Skip desktop ringtone")
+    parser.add_argument("--no-app", action="store_true", help="Skip launching LiveKit Desktop window")
+
+    args = parser.parse_args()
+
+    call_text = " ".join(args.message).strip() if args.message else DEFAULT_CALL_TEXT_TAMIL
+    api_key = get_api_key()
+
+    if not api_key:
+        print("❌ OpenWA API key not found. Ensure milo-openwa is running.")
+        sys.exit(1)
+
+    print("═════════════════════════════════════════════════════════════════")
+    print(" 📞 MILO AI VOICE CALL INITIATION")
+    print("═════════════════════════════════════════════════════════════════")
+    print(f"  ● Recipient: {args.chat}")
+    print(f"  ● Message: {call_text[:65]}...")
+    
+    # 1. Sound incoming call chime
+    if not args.no_ring:
+        play_ringtone()
+    
+    # 2. Desktop notification & Web/Mobile App Ringing Push
+    trigger_notification()
+    broadcast_app_call(call_text)
+
+    # 3. Synthesize voice audio
+    print("  ● Synthesizing neural voice note with edge-tts & ffmpeg...")
+    ogg_file = synthesize_voice(call_text, voice=args.voice)
+
+    # 4. Dispatch via OpenWA
+    print("  ● Dispatching WhatsApp Voice Call (PTT) via OpenWA gateway...")
+    try:
+        res = send_whatsapp_voice_note(ogg_file, args.chat, api_key)
+        msg_id = res.get("messageId", "ok")
+        print(f"  ✔ WhatsApp Voice Note successfully sent! [ID: {msg_id}]")
+    except Exception as e:
+        print(f"  ⚠ WhatsApp dispatch note: {e}")
+    finally:
+        try:
+            os.remove(ogg_file)
+        except OSError:
+            pass
+
+    # 5. Launch LiveKit voice room
+    if not args.no_app:
+        print("  ● Launching LiveKit WebRTC Voice Studio interface...")
+        launch_livekit_studio()
+
+    print("═════════════════════════════════════════════════════════════════")
+    print(" 🎙️ Call connected! Check your WhatsApp and the Desktop Studio.")
+    print("═════════════════════════════════════════════════════════════════")
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,16 @@
+[Unit]
+Description=Kino Cinema Studio Web UI Service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/jeffy/.local/share/milo/kino/studio
+ExecStart=/home/jeffy/.local/share/milo/venv/bin/python3 /home/jeffy/.local/share/milo/kino/studio/server.py
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+Environment=KINO_PORT=3140
+Environment=KINO_HOST=0.0.0.0
+
+[Install]
+WantedBy=default.target

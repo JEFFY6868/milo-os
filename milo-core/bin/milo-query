@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Milo Obsidian Memory Query Engine
+set -eo pipefail
+
+VAULT_DIR="${HOME}/Documents/Obsidian/Milo"
+DAILY_DIR="${VAULT_DIR}/Daily"
+TODAY=$(date +%Y-%m-%d)
+TIMESTAMP=$(date +"%H:%M")
+DAILY_FILE="${DAILY_DIR}/${TODAY}.md"
+
+QUERY="$*"
+if [[ -z "$QUERY" ]]; then
+  echo "Error: No query provided to milo-query" >&2
+  exit 1
+fi
+
+# Ensure daily directory exists
+mkdir -p "$DAILY_DIR"
+
+# Initialize today's daily note if it does not exist
+if [[ ! -f "$DAILY_FILE" ]]; then
+  cat <<EOF > "$DAILY_FILE"
+# 📅 Daily Note: ${TODAY}
+
+## 💬 Conversations & Interaction Log
+
+EOF
+fi
+
+# Prepare prompt with dynamic Obsidian memory injection
+CORE_FACTS=$(grep -E '^\- ' "${VAULT_DIR}/Memories/Core_Memories.md" 2>/dev/null | tail -n 6 || true)
+USER_PREFS=$(grep -E '^\- ' "${VAULT_DIR}/Memories/Preferences.md" 2>/dev/null | tail -n 6 || true)
+USER_BIO=$(grep -E '^\- ' "${VAULT_DIR}/Profile/Jeffy.md" 2>/dev/null | head -n 5 || true)
+
+MEMORY_DIRECTIVE="[System Context: You are Milo, Jeffy's personal ambient AI desktop companion on Arch Linux / Hyprland.
+Your persistent long-term memory is active and loaded from your Obsidian Neural Vault.
+Jeffy's Profile:
+${USER_BIO}
+
+Active Core Memories:
+${CORE_FACTS}
+
+Distilled User Preferences:
+${USER_PREFS}
+
+Directives: Keep answers conversational, helpful, and concise. Maintain continuity with Jeffy's preferences.]"
+
+FULL_PROMPT="${MEMORY_DIRECTIVE}
+
+User prompt: ${QUERY}"
+
+# Execute Antigravity CLI with Obsidian vault workspace attached (with fallback to Milo Companion engine)
+RESPONSE=$(/home/jeffy/.local/bin/agy \
+  --project milo-desktop \
+  --add-dir "$VAULT_DIR" \
+  --dangerously-skip-permissions \
+  -c \
+  -p "$FULL_PROMPT" \
+  --effort low 2>/dev/null || true)
+
+# Fallback if empty or quota exceeded
+if [[ -z "$RESPONSE" || "$RESPONSE" =~ "RESOURCE_EXHAUSTED" || "$RESPONSE" =~ "Individual quota" ]]; then
+  RESPONSE=$(/home/jeffy/.local/share/milo/venv/bin/python3 -c "
+import sys
+sys.path.insert(0, '/home/jeffy/.local/share/milo/kino/studio')
+import milo_companion
+res = milo_companion.ask_milo('''$QUERY''')
+print(res['reply'])
+" 2>/dev/null || echo "Standing by, Jeffy.")
+fi
+
+# Append interaction to today's Obsidian daily note
+cat <<EOF >> "$DAILY_FILE"
+### ${TIMESTAMP} - Interaction
+- **Jeffy:** ${QUERY}
+- **Milo:** ${RESPONSE}
+
+EOF
+
+# Non-blocking background reflection to distill new preferences/skills
+/home/jeffy/.local/bin/milo-reflect >/dev/null 2>&1 &
+
+# Output clean response to stdout
+echo "$RESPONSE"

@@ -1,0 +1,230 @@
+#!/usr/bin/env bash
+# Milo OpenWA WhatsApp Gateway CLI Interface
+set -eo pipefail
+
+OPENWA_DIR="${HOME}/.local/share/milo/openwa"
+API_KEY_FILE="${OPENWA_DIR}/data/.api-key"
+QR_IMAGE="${HOME}/.local/share/milo/whatsapp_qr.png"
+BRIDGE_SCRIPT="${HOME}/.local/share/milo/wa_bridge.py"
+OPENWA_URL="http://127.0.0.1:2785"
+WEBHOOK_URL="http://127.0.0.1:2786/webhook"
+
+# Terminal Colors
+CYAN="\033[36m"
+GREEN="\033[32m"
+YELLOW="\033[33m"
+RED="\033[31m"
+MAGENTA="\033[35m"
+BOLD="\033[1m"
+DIM="\033[2m"
+RESET="\033[0m"
+
+get_api_key() {
+  if [[ -f "$API_KEY_FILE" ]]; then
+    cat "$API_KEY_FILE" | tr -d '\n\r'
+  else
+    echo ""
+  fi
+}
+
+get_session_id() {
+  local key
+  key=$(get_api_key)
+  curl -s -H "X-API-Key: ${key}" "${OPENWA_URL}/api/sessions" | jq -r '.[0].id // empty' 2>/dev/null || true
+}
+
+ensure_service_running() {
+  if ! systemctl --user is-active --quiet milo-openwa.service; then
+    echo -e "${YELLOW}Starting milo-openwa service...${RESET}"
+    systemctl --user start milo-openwa.service
+    sleep 3
+  fi
+}
+
+CMD="${1:-}"
+
+case "$CMD" in
+  status)
+    echo -e "\n${BOLD}${CYAN}📱 MILO WHATSAPP GATEWAY (OpenWA Baileys)${RESET}"
+    SVC_STATUS=$(systemctl --user is-active milo-openwa.service 2>/dev/null || echo "inactive")
+    if [[ "$SVC_STATUS" == "active" ]]; then
+      echo -e "  ${BOLD}Gateway Service:${RESET} ${GREEN}● Active (Running on port 2785)${RESET}"
+    else
+      echo -e "  ${BOLD}Gateway Service:${RESET} ${RED}○ Inactive${RESET}"
+    fi
+
+    BRIDGE_STATUS=$(systemctl --user is-active milo-wa-bridge.service 2>/dev/null || echo "inactive")
+    if [[ "$BRIDGE_STATUS" == "active" ]]; then
+      echo -e "  ${BOLD}AI Bridge Daemon:${RESET} ${GREEN}● Active (Listening for phone messages)${RESET}"
+    else
+      echo -e "  ${BOLD}AI Bridge Daemon:${RESET} ${YELLOW}○ Stopped (Run: systemctl --user start milo-wa-bridge)${RESET}"
+    fi
+
+    KEY=$(get_api_key)
+    if [[ -z "$KEY" ]]; then
+      echo -e "  ${BOLD}API Key:${RESET} ${YELLOW}Not yet generated${RESET}"
+      exit 0
+    fi
+    echo -e "  ${BOLD}API Key:${RESET} ${KEY:0:10}...${KEY: -6}"
+    echo -e "  ${BOLD}Dashboard:${RESET} ${CYAN}${OPENWA_URL}${RESET}"
+
+    SESSIONS=$(curl -s -H "X-API-Key: ${KEY}" "${OPENWA_URL}/api/sessions" 2>/dev/null || echo "[]")
+    SESSION_COUNT=$(echo "$SESSIONS" | jq '. | length' 2>/dev/null || echo "0")
+    echo -e "  ${BOLD}Active Sessions:${RESET} ${SESSION_COUNT}"
+
+    if [[ "$SESSION_COUNT" -gt 0 ]]; then
+      echo "$SESSIONS" | jq -r '.[] | "    • ID: \(.id)\n      Name: \(.name)\n      Status: \(.status)\n      Phone: \(.phone // "Not paired")"'
+    fi
+    echo ""
+    ;;
+
+  start)
+    systemctl --user start milo-openwa.service
+    echo -e "${GREEN}✦ Started milo-openwa.service${RESET}"
+    ;;
+
+  stop)
+    systemctl --user stop milo-openwa.service
+    echo -e "${YELLOW}✦ Stopped milo-openwa.service${RESET}"
+    ;;
+
+  restart)
+    systemctl --user restart milo-openwa.service
+    echo -e "${GREEN}✦ Restarted milo-openwa.service${RESET}"
+    ;;
+
+  dashboard|web)
+    echo -e "${CYAN}✦ Opening OpenWA Dashboard (${OPENWA_URL})...${RESET}"
+    xdg-open "${OPENWA_URL}" 2>/dev/null || true
+    ;;
+
+  qr|pair)
+    ensure_service_running
+    KEY=$(get_api_key)
+    SID=$(get_session_id)
+
+    if [[ -z "$SID" ]]; then
+      echo -e "${YELLOW}Creating default session 'milo'...${RESET}"
+      SID=$(curl -s -X POST "${OPENWA_URL}/api/sessions" \
+        -H "Content-Type: application/json" \
+        -H "X-API-Key: ${KEY}" \
+        -d '{"name": "milo"}' | jq -r '.id')
+      sleep 1
+    fi
+
+    echo -e "${CYAN}✦ Starting session ${SID}...${RESET}"
+    curl -s -X POST "${OPENWA_URL}/api/sessions/${SID}/start" \
+      -H "X-API-Key: ${KEY}" >/dev/null 2>&1 || true
+
+    echo -e "${CYAN}✦ Fetching Pairing QR Code...${RESET}"
+    sleep 2
+
+    # Fetch QR data and decode
+    python3 -c "
+import urllib.request, json, base64, os
+api_key = '$(get_api_key)'
+sid = '${SID}'
+req = urllib.request.Request(f'${OPENWA_URL}/api/sessions/{sid}/qr', headers={'X-API-Key': api_key})
+try:
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        d = json.loads(resp.read().decode())
+        qr = d.get('qrCode')
+        if qr and ',' in qr:
+            raw = base64.b64decode(qr.split(',')[1])
+            with open('${QR_IMAGE}', 'wb') as f:
+                f.write(raw)
+            print('QR_SAVED')
+        else:
+            print(f'STATUS: {d.get(\"status\")}')
+except Exception as e:
+    print('ERROR:', e)
+" > /tmp/milo_qr_res.txt
+
+    RES=$(cat /tmp/milo_qr_res.txt)
+    if [[ "$RES" == *"QR_SAVED"* ]]; then
+      echo -e "\n${BOLD}${GREEN}✦ SCAN WITH WHATSAPP LINKED DEVICES:${RESET}\n"
+      RAW_STRING=$(zbarimg -q --raw "$QR_IMAGE" 2>/dev/null || true)
+      if [[ -n "$RAW_STRING" ]] && command -v qrencode >/dev/null; then
+        qrencode -t UTF8 "$RAW_STRING"
+      fi
+      echo -e "\n${DIM}QR Image saved to:${RESET} ${CYAN}${QR_IMAGE}${RESET}"
+      echo -e "${DIM}Or open Dashboard in browser:${RESET} ${BOLD}${OPENWA_URL}${RESET}\n"
+    else
+      echo -e "${YELLOW}Notice:${RESET} ${RES}"
+      echo -e "You can also view the QR live on the Web Dashboard: ${CYAN}${OPENWA_URL}${RESET}"
+    fi
+    ;;
+
+  send)
+    shift
+    RECIPIENT="${1:-}"
+    shift || true
+    MESSAGE="$*"
+
+    if [[ -z "$RECIPIENT" || -z "$MESSAGE" ]]; then
+      echo "Usage: milo wa send <phone_number_or_chatId> \"<message>\"" >&2
+      echo "Example: milo wa send 919876543210 \"Hello from Milo!\"" >&2
+      exit 1
+    fi
+
+    # Format phone number if missing suffix
+    if [[ "$RECIPIENT" != *"@"* ]]; then
+      RECIPIENT="${RECIPIENT//[^0-9]/}@c.us"
+    fi
+
+    KEY=$(get_api_key)
+    SID=$(get_session_id)
+
+    if [[ -z "$SID" ]]; then
+      echo -e "${RED}Error: No active WhatsApp session found. Run 'milo wa qr' to pair first.${RESET}" >&2
+      exit 1
+    fi
+
+    echo -e "${CYAN}✦ Sending WhatsApp message to ${RECIPIENT}...${RESET}"
+    PAYLOAD=$(jq -n --arg chat "$RECIPIENT" --arg msg "$MESSAGE" '{chatId: $chat, text: $msg}')
+    RESP=$(curl -s -X POST "${OPENWA_URL}/api/sessions/${SID}/messages/send-text" \
+      -H "Content-Type: application/json" \
+      -H "X-API-Key: ${KEY}" \
+      -d "$PAYLOAD")
+
+    STATUS=$(echo "$RESP" | jq -r '.status // "ok"')
+    if [[ "$STATUS" == "ok" || "$RESP" == *"\"id\""* ]]; then
+      echo -e "${GREEN}✔ Message Sent Successfully!${RESET}"
+    else
+      echo -e "${RED}✖ Failed to send:${RESET} $RESP"
+    fi
+    ;;
+
+  bridge|listen)
+    ensure_service_running
+    KEY=$(get_api_key)
+    SID=$(get_session_id)
+
+    # Register webhook if not already registered
+    echo -e "${CYAN}✦ Registering OpenWA Webhook -> ${WEBHOOK_URL}...${RESET}"
+    curl -s -X POST "${OPENWA_URL}/api/sessions/${SID}/webhooks" \
+      -H "Content-Type: application/json" \
+      -H "X-API-Key: ${KEY}" \
+      -d "{\"url\": \"${WEBHOOK_URL}\", \"events\": [\"message.received\"]}" >/dev/null 2>&1 || true
+
+    # Run the Python bridge
+    exec python3 "$BRIDGE_SCRIPT"
+    ;;
+
+  *)
+    cat <<EOF
+${BOLD}${CYAN}Milo WhatsApp Integration CLI (Powered by OpenWA Baileys)${RESET}
+
+Usage:
+  milo wa status         Inspect OpenWA gateway status & session health
+  milo wa qr             Display pairing QR code in terminal & save PNG
+  milo wa send <to> <msg> Send WhatsApp text message to contact or group
+  milo wa bridge         Start bidirectional webhook listener (phone <-> Milo brain)
+  milo wa dashboard      Open OpenWA web management UI in browser (port 2785)
+  milo wa start          Start milo-openwa background service
+  milo wa stop           Stop milo-openwa background service
+  milo wa restart        Restart milo-openwa background service
+
+EOF
+    ;;
+esac

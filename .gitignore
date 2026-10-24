@@ -1,0 +1,31 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env.local
+
+# Secrets & Private Environment variables
+*.env
+!*.env.example
+
+# Node / JS
+node_modules/
+dist/
+
+# Android build outputs & private keystores
+android/milo-android-native/build/
+*.keystore
+
+# Sensitive logs & sessions
+*.log
+data/
+whatsapp_qr.png
+
+# OS artifacts
+.DS_Store
+Thumbs.db

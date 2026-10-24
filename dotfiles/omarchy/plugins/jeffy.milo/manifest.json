@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "jeffy.milo",
+  "name": "Milo AI Desktop",
+  "version": "1.0.0",
+  "author": "Jeffy",
+  "description": "Milo AI ambient desktop wallpaper companion and assistant",
+  "kinds": ["service"],
+  "entryPoints": {
+    "service": "MiloService.qml"
+  }
+}

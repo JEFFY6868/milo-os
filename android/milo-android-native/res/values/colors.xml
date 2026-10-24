@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg_noir_950">#040508</color>
+    <color name="bg_noir_900">#070a12</color>
+    <color name="bg_noir_850">#0c121e</color>
+    <color name="bg_card">#0e1422</color>
+    <color name="card_border">#1a2438</color>
+    <color name="card_border_glow">#33f59e0b</color>
+    
+    <color name="amber_primary">#f59e0b</color>
+    <color name="amber_light">#fbbf24</color>
+    <color name="amber_dark">#d97706</color>
+    <color name="amber_glow">#40f59e0b</color>
+    
+    <color name="emerald_online">#10b981</color>
+    <color name="emerald_glow">#4010b981</color>
+    <color name="rose_decline">#f43f5e</color>
+    <color name="rose_glow">#50f43f5e</color>
+    
+    <color name="text_white">#f8fafc</color>
+    <color name="text_slate_200">#e2e8f0</color>
+    <color name="text_slate_400">#94a3b8</color>
+    <color name="text_slate_500">#64748b</color>
+</resources>

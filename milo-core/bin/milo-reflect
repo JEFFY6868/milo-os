@@ -1,0 +1,270 @@
+#!/usr/bin/env python3
+"""
+Milo Obsidian Reflection & Continuous Learning Engine (Harness² Inspired)
+Extracts lessons, preferences, and skills from daily interactions and web research,
+distilling them into Milo's persistent long-term Obsidian Neural Vault.
+"""
+
+import sys
+import os
+import re
+import json
+import time
+from pathlib import Path
+from datetime import datetime, timedelta
+from typing import List, Dict, Any, Set
+
+# Obsidian Vault Paths
+HOME = Path.home()
+VAULT_DIR = HOME / "Documents" / "Obsidian" / "Milo"
+DAILY_DIR = VAULT_DIR / "Daily"
+MEMORIES_DIR = VAULT_DIR / "Memories"
+PROFILE_DIR = VAULT_DIR / "Profile"
+KNOWLEDGE_DIR = VAULT_DIR / "Knowledge"
+RESEARCH_DIR = KNOWLEDGE_DIR / "Web_Research"
+LESSONS_DIR = KNOWLEDGE_DIR / "Harness_Lessons"
+SKILLS_DIR = KNOWLEDGE_DIR / "Learned_Skills"
+DASHBOARD_FILE = VAULT_DIR / "Dashboard.md"
+
+# Output Files
+PREFERENCES_FILE = MEMORIES_DIR / "Preferences.md"
+CORE_MEMORIES_FILE = MEMORIES_DIR / "Core_Memories.md"
+SKILLS_INDEX_FILE = SKILLS_DIR / "Index.md"
+
+# Terminal Colors
+CYAN = "\033[36m"
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+MAGENTA = "\033[35m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
+RESET = "\033[0m"
+
+
+def update_hud(message: str):
+    """Safely forward a notification to the Omarchy Wayland HUD."""
+    try:
+        clean_msg = message.replace('"', '\\"').replace("'", "")
+        os.system(f"omarchy-shell -q milo say \"{clean_msg}\" >/dev/null 2>&1 &")
+    except Exception:
+        pass
+
+
+class ReflectionEngine:
+    def __init__(self):
+        self.today = datetime.now().strftime("%Y-%m-%d")
+        self.yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        self.extracted_preferences: List[str] = []
+        self.extracted_skills: List[Dict[str, str]] = []
+        self.extracted_milestones: List[str] = []
+        self.summary_points: List[str] = []
+
+    def run(self, verbose: bool = True) -> Dict[str, Any]:
+        start_time = time.time()
+        if verbose:
+            print(f"\n{BOLD}{MAGENTA}🧠 MILO HARNESS² REFLECTION ENGINE ACTIVE{RESET}")
+            print(f"  {BOLD}Vault:{RESET} {VAULT_DIR}")
+            print(f"  {BOLD}Analyzing Period:{RESET} {self.yesterday} to {self.today}\n")
+
+        update_hud("🧠 Milo: Running experience reflection...")
+
+        # 1. Ingest Daily Interaction Logs
+        self._analyze_daily_notes()
+
+        # 2. Ingest Web Research & Harness Lessons
+        self._analyze_web_research()
+        self._analyze_harness_lessons()
+
+        # 3. Commit Distilled Memories to Obsidian
+        prefs_added = self._commit_preferences()
+        skills_added = self._commit_skills()
+        self._update_dashboard_summary()
+
+        duration = time.time() - start_time
+
+        if verbose:
+            print(f"{GREEN}{BOLD}✦ Reflection & Continuous Learning Complete! ({duration:.2f}s){RESET}")
+            print(f"  • {BOLD}Preferences Distilled:{RESET} {len(self.extracted_preferences)} (New: {prefs_added})")
+            print(f"  • {BOLD}Learned Skills Recorded:{RESET} {len(self.extracted_skills)} (New: {skills_added})")
+            print(f"  • {BOLD}Daily Milestones Logged:{RESET} {len(self.summary_points)}")
+            print(f"  • {BOLD}Dashboard Updated:{RESET} [[Dashboard.md]]\n")
+
+        hud_msg = f"🧠 Reflection complete: {prefs_added} new preferences, {skills_added} skills distilled."
+        update_hud(hud_msg)
+
+        return {
+            "duration_sec": duration,
+            "preferences_added": prefs_added,
+            "skills_added": skills_added,
+            "summary_points": self.summary_points
+        }
+
+    def _analyze_daily_notes(self):
+        """Parse interaction notes for user preferences, commands, and project context."""
+        for date_str in [self.yesterday, self.today]:
+            daily_path = DAILY_DIR / f"{date_str}.md"
+            if not daily_path.exists():
+                continue
+
+            content = daily_path.read_text(encoding="utf-8")
+
+            # Extract user prompts & Milo answers
+            interactions = re.findall(r"-\s+\*\*Jeffy:\*\*\s+(.*?)\n-\s+\*\*Milo:\*\*\s+(.*?)(?=\n###|\Z)", content, re.DOTALL)
+            for user_q, milo_a in interactions:
+                user_q = user_q.strip()
+                milo_a = milo_a.strip()
+
+                # Preference patterns (e.g. "I love...", "I prefer...", "Always use...", "Never...")
+                pref_match = re.search(r"(?i)\b(i love|i prefer|always use|never use|i want|my favorite|i like)\b\s+(.*)", user_q)
+                if pref_match:
+                    self.extracted_preferences.append(f"{pref_match.group(1).capitalize()} {pref_match.group(2)}")
+
+                # Technical skills/languages mentioned
+                if re.search(r"(?i)\b(rust|c\+\+|hyprland|wayland|qt|qml|arch linux|obsidian|python)\b", user_q):
+                    clean_line = user_q.replace("\n", " ")[:80]
+                    self.summary_points.append(f"Work with {clean_line}")
+
+    def _analyze_web_research(self):
+        """Review recent research reports in Knowledge/Web_Research/"""
+        if not RESEARCH_DIR.exists():
+            return
+
+        for report in sorted(RESEARCH_DIR.glob("*.md"), key=os.path.getmtime, reverse=True)[:5]:
+            try:
+                text = report.read_text(encoding="utf-8")
+                task_match = re.search(r"# 🌐 Web Research:\s*(.*)", text)
+                if task_match:
+                    task = task_match.group(1).strip()
+                    self.summary_points.append(f"Researched: {task}")
+            except Exception:
+                pass
+
+    def _analyze_harness_lessons(self):
+        """Review recent Harness² self-healing lessons in Knowledge/Harness_Lessons/"""
+        if not LESSONS_DIR.exists():
+            return
+
+        for lesson_file in sorted(LESSONS_DIR.glob("*.md"), key=os.path.getmtime, reverse=True)[:5]:
+            try:
+                text = lesson_file.read_text(encoding="utf-8")
+                strategy_match = re.search(r"- \*\*Winning Harness Component:\*\*\s*`(.*?)`", text)
+                task_match = re.search(r"# 🧬 Harness² Reflection Lesson:\s*(.*)", text)
+
+                if strategy_match and task_match:
+                    strat = strategy_match.group(1).strip()
+                    task = task_match.group(1).strip()
+                    self.extracted_skills.append({
+                        "name": f"Autonomous Fallback for {task[:30]}",
+                        "strategy": strat,
+                        "source": lesson_file.name
+                    })
+            except Exception:
+                pass
+
+    def _commit_preferences(self) -> int:
+        """Appends newly discovered user preferences into Memories/Preferences.md."""
+        MEMORIES_DIR.mkdir(parents=True, exist_ok=True)
+
+        existing_text = PREFERENCES_FILE.read_text(encoding="utf-8") if PREFERENCES_FILE.exists() else ""
+        if not PREFERENCES_FILE.exists():
+            existing_text = """# ⚙️ User Preferences & Workflow Habits
+
+Persistent preferences, aesthetics, and working rules automatically maintained by Milo.
+
+---
+
+## 🎨 Aesthetics & Desktop
+- **Compositor:** Hyprland with dynamic blur and smooth animations.
+- **HUD Anchor:** Wayland layer `WlrLayer.Bottom` (Wallpaper HUD).
+- **Theme:** Dark mode, cyber-clean aesthetic.
+
+## 🛠️ Tech Stack & Tooling
+- **Primary OS:** Arch Linux (rolling release).
+- **Core Languages:** Rust, C++, Python, Qt/QML.
+- **Note Taking & Memory:** Obsidian Markdown.
+
+## 📌 Learned Rules
+"""
+            PREFERENCES_FILE.write_text(existing_text)
+
+        new_count = 0
+        with open(PREFERENCES_FILE, "a", encoding="utf-8") as f:
+            for pref in self.extracted_preferences:
+                # Deduplicate
+                if pref.lower() not in existing_text.lower():
+                    f.write(f"- **Learned ({self.today}):** {pref}\n")
+                    new_count += 1
+
+        return new_count
+
+    def _commit_skills(self) -> int:
+        """Stores distilled technical skills and fallback recipes in Knowledge/Learned_Skills/Index.md."""
+        SKILLS_DIR.mkdir(parents=True, exist_ok=True)
+
+        existing_text = SKILLS_INDEX_FILE.read_text(encoding="utf-8") if SKILLS_INDEX_FILE.exists() else ""
+        if not SKILLS_INDEX_FILE.exists():
+            existing_text = """# 🛠️ Milo Learned Skills & Execution Strategies
+
+Catalog of autonomous recipes, fallback workflows, and shell patterns distilled by Milo.
+
+---
+
+| Skill / Strategy | Category | Source Note | Distilled Date |
+| :--- | :--- | :--- | :--- |
+"""
+            SKILLS_INDEX_FILE.write_text(existing_text)
+
+        new_count = 0
+        with open(SKILLS_INDEX_FILE, "a", encoding="utf-8") as f:
+            for skill in self.extracted_skills:
+                skill_name = skill["name"]
+                if skill_name.lower() not in existing_text.lower():
+                    row = f"| **{skill_name}** | `{skill['strategy']}` | [[Knowledge/Harness_Lessons/{Path(skill['source']).stem}|Lesson]] | {self.today} |\n"
+                    f.write(row)
+                    new_count += 1
+
+        return new_count
+
+    def _update_dashboard_summary(self):
+        """Updates the central Dashboard with latest distilled reflection summary."""
+        if not DASHBOARD_FILE.exists():
+            return
+
+        dashboard_text = DASHBOARD_FILE.read_text(encoding="utf-8")
+
+        summary_bullets = "\n".join([f"- {s}" for s in set(self.summary_points[:5])]) or "- Normal operations & active assistance."
+
+        reflection_section = f"""
+
+---
+
+## 🧠 Milo Recent Learnings & Focus
+*Last Distillation: {datetime.now().strftime('%Y-%m-%d %H:%M')}*
+{summary_bullets}
+
+- Preferences: [[Memories/Preferences]]
+- Learned Skills: [[Knowledge/Learned_Skills/Index|Skills Catalog]]
+- Harness Lessons: [[Knowledge/Harness_Lessons]]
+"""
+
+        # Replace existing reflection section or append
+        if "## 🧠 Milo Recent Learnings & Focus" in dashboard_text:
+            dashboard_text = re.sub(
+                r"## 🧠 Milo Recent Learnings & Focus.*?(?=\n##|\Z)",
+                f"## 🧠 Milo Recent Learnings & Focus\n*Last Distillation: {datetime.now().strftime('%Y-%m-%d %H:%M')}*\n{summary_bullets}\n\n- Preferences: [[Memories/Preferences]]\n- Learned Skills: [[Knowledge/Learned_Skills/Index|Skills Catalog]]\n- Harness Lessons: [[Knowledge/Harness_Lessons]]\n",
+                dashboard_text,
+                flags=re.DOTALL
+            )
+        else:
+            dashboard_text += reflection_section
+
+        DASHBOARD_FILE.write_text(dashboard_text, encoding="utf-8")
+
+
+def main():
+    engine = ReflectionEngine()
+    engine.run(verbose=True)
+
+
+if __name__ == "__main__":
+    main()

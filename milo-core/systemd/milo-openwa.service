@@ -1,0 +1,16 @@
+[Unit]
+Description=Milo OpenWA WhatsApp API Gateway (Baileys Engine)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/jeffy/.local/share/milo/openwa
+ExecStart=/home/jeffy/.local/share/mise/installs/node/26.8.2/bin/node dist/main
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=PORT=2785
+EnvironmentFile=-/home/jeffy/.local/share/milo/openwa/.env
+
+[Install]
+WantedBy=default.target

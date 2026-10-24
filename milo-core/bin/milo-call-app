@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Milo AI Live Call — Native Desktop App Launcher
+# Uses native Chromium standalone app mode with zero browser chrome
+
+APP_URL="http://127.0.0.1:3140/call"
+
+# Check if already running in Hyprland
+if hyprctl clients -j 2>/dev/null | grep -q 'Milo AI — Live Voice Call'; then
+  hyprctl dispatch 'hl.dsp.focus({ window = "title:Milo AI — Live Voice Call" })' >/dev/null 2>&1
+  exit 0
+fi
+
+# Ensure Studio service & LiveKit are active
+systemctl --user start milo-kino-studio.service milo-livekit.service >/dev/null 2>&1
+
+mkdir -p "${HOME}/.local/share/milo/call/profile"
+
+# Launch as dedicated Wayland desktop application
+setsid chromium \
+  --app="${APP_URL}" \
+  --class="milo-call" \
+  --name="milo-call" \
+  --user-data-dir="${HOME}/.local/share/milo/call/profile" \
+  --ozone-platform=wayland \
+  --autoplay-policy=no-user-gesture-required \
+  "$@" >/dev/null 2>&1 &

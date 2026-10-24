@@ -1,0 +1,639 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_screen"
+    android:keepScreenOn="true">
+
+    <!-- ========================================================================= -->
+    <!-- SCREEN 1: STANDBY (Ready to Call) -->
+    <!-- ========================================================================= -->
+    <LinearLayout
+        android:id="@+id/layoutStandby"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:paddingTop="36dp"
+        android:paddingBottom="24dp"
+        android:visibility="visible">
+
+        <!-- TOP BAR: Brand, Subtitle & Online Mesh Status -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <!-- Logo Clapperboard Box -->
+            <FrameLayout
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="@drawable/bg_voice_selector"
+                android:padding="2dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:text="🎬"
+                    android:textSize="20sp" />
+            </FrameLayout>
+
+            <!-- Brand Titles -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:layout_marginStart="12dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="MILO AI"
+                    android:textColor="#f8fafc"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.06" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Your Ambient Personal Companion"
+                    android:textColor="#94a3b8"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <!-- Online Badge -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/bg_chip_normal"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:paddingTop="5dp"
+                android:paddingBottom="5dp">
+
+                <View
+                    android:layout_width="6dp"
+                    android:layout_height="6dp"
+                    android:background="@drawable/btn_accept_call" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text=" MESH READY"
+                    android:textColor="#10b981"
+                    android:textSize="9sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.08" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- AI COMPANION / SUBAGENT CHIPS -->
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="none"
+            android:layout_marginTop="28dp">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/chipMilo"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🤖 Milo (Main AI)"
+                    android:textColor="#fbbf24"
+                    android:textStyle="bold"
+                    android:textSize="12sp"
+                    android:background="@drawable/bg_chip_selected"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="8dp"
+                    android:layout_marginEnd="8dp" />
+
+                <TextView
+                    android:id="@+id/chipKinoStory"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🎬 Kino (Script Doctor)"
+                    android:textColor="#94a3b8"
+                    android:textSize="12sp"
+                    android:background="@drawable/bg_chip_normal"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="8dp"
+                    android:layout_marginEnd="8dp" />
+
+                <TextView
+                    android:id="@+id/chipCharacters"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🎭 Character Arcs"
+                    android:textColor="#94a3b8"
+                    android:textSize="12sp"
+                    android:background="@drawable/bg_chip_normal"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="8dp"
+                    android:layout_marginEnd="8dp" />
+
+                <TextView
+                    android:id="@+id/chipShotlist"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🎥 Shotlists"
+                    android:textColor="#94a3b8"
+                    android:textSize="12sp"
+                    android:background="@drawable/bg_chip_normal"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="8dp" />
+            </LinearLayout>
+        </HorizontalScrollView>
+
+        <!-- CENTERPIECE: Glowing Luxury Call Orb -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:gravity="center">
+
+            <!-- Outer Halo Ring -->
+            <View
+                android:layout_width="220dp"
+                android:layout_height="220dp"
+                android:layout_gravity="center"
+                android:background="@drawable/bg_call_orb_halo" />
+
+            <!-- Core Clickable Calling Disc -->
+            <FrameLayout
+                android:id="@+id/btnStartCall"
+                android:layout_width="168dp"
+                android:layout_height="168dp"
+                android:layout_gravity="center"
+                android:background="@drawable/bg_call_disc"
+                android:clickable="true"
+                android:focusable="true">
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:orientation="vertical"
+                    android:gravity="center">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="📞"
+                        android:textSize="28sp"
+                        android:layout_marginBottom="4dp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="START CALL"
+                        android:textColor="#f59e0b"
+                        android:textSize="15sp"
+                        android:textStyle="bold"
+                        android:letterSpacing="0.12" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="TAP TO CONNECT"
+                        android:textColor="#94a3b8"
+                        android:textSize="9sp"
+                        android:letterSpacing="0.15"
+                        android:layout_marginTop="2dp" />
+                </LinearLayout>
+            </FrameLayout>
+        </FrameLayout>
+
+        <!-- Description Note -->
+        <TextView
+            android:id="@+id/txtSessionHint"
+            android:layout_width="280dp"
+            android:layout_height="wrap_content"
+            android:text="Hands-free real-time brainstorming session with Milo. Synced with your Obsidian Cinema Vault."
+            android:textColor="#64748b"
+            android:textSize="12sp"
+            android:gravity="center"
+            android:lineSpacingExtra="3dp"
+            android:layout_marginBottom="20dp" />
+
+        <!-- MODERN VOICE SELECTOR CARD -->
+        <LinearLayout
+            android:id="@+id/btnSelectVoiceCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/bg_voice_selector"
+            android:padding="14dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:layout_marginBottom="12dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🎙️"
+                android:textSize="20sp"
+                android:layout_marginEnd="12dp" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="ACTIVE AI VOICE"
+                    android:textColor="#f59e0b"
+                    android:textSize="9sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.1" />
+
+                <TextView
+                    android:id="@+id/txtCurrentVoiceName"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Valluvar (Tamil)"
+                    android:textColor="#f8fafc"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:layout_marginTop="2dp" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="CHANGE ▾"
+                android:textColor="#f59e0b"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.05" />
+        </LinearLayout>
+
+        <!-- Hidden Legacy Spinner for Data Binding -->
+        <Spinner
+            android:id="@+id/spinnerVoice"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="invisible" />
+
+        <!-- BOTTOM ACTION: Test Ring -->
+        <Button
+            android:id="@+id/btnSimulateRing"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="🔔 Test Incoming Call Screen"
+            android:textColor="#94a3b8"
+            android:textSize="11sp"
+            android:background="@drawable/bg_chip_normal"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp" />
+    </LinearLayout>
+
+    <!-- ========================================================================= -->
+    <!-- SCREEN 2: INCOMING CALL (Ringing Screen) -->
+    <!-- ========================================================================= -->
+    <LinearLayout
+        android:id="@+id/layoutIncoming"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:padding="32dp"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="INCOMING AI CALL"
+            android:textColor="#f59e0b"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.15"
+            android:layout_marginTop="48dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="MILO AI"
+            android:textColor="#ffffff"
+            android:textSize="34sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.04"
+            android:layout_marginTop="8dp" />
+
+        <TextView
+            android:id="@+id/txtIncomingReason"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Screenplay Brainstorming Session"
+            android:textColor="#94a3b8"
+            android:textSize="13sp"
+            android:layout_marginTop="6dp" />
+
+        <!-- Pulsing Avatar Centerpiece -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:gravity="center">
+
+            <View
+                android:layout_width="200dp"
+                android:layout_height="200dp"
+                android:layout_gravity="center"
+                android:background="@drawable/bg_call_orb_halo" />
+
+            <FrameLayout
+                android:layout_width="140dp"
+                android:layout_height="140dp"
+                android:layout_gravity="center"
+                android:background="@drawable/btn_accept_call">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:text="🎬"
+                    android:textSize="48sp" />
+            </FrameLayout>
+        </FrameLayout>
+
+        <!-- Accept / Decline Action Buttons -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_marginBottom="48dp">
+
+            <!-- Decline -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:layout_marginEnd="64dp">
+
+                <FrameLayout
+                    android:id="@+id/btnDeclineCall"
+                    android:layout_width="68dp"
+                    android:layout_height="68dp"
+                    android:background="@drawable/btn_end_call"
+                    android:clickable="true"
+                    android:focusable="true">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center"
+                        android:text="✕"
+                        android:textColor="#ffffff"
+                        android:textSize="26sp"
+                        android:textStyle="bold" />
+                </FrameLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Decline"
+                    android:textColor="#94a3b8"
+                    android:textSize="12sp"
+                    android:layout_marginTop="8dp" />
+            </LinearLayout>
+
+            <!-- Accept -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center">
+
+                <FrameLayout
+                    android:id="@+id/btnAcceptCall"
+                    android:layout_width="74dp"
+                    android:layout_height="74dp"
+                    android:background="@drawable/btn_accept_call"
+                    android:clickable="true"
+                    android:focusable="true">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center"
+                        android:text="📞"
+                        android:textSize="30sp" />
+                </FrameLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Accept Call"
+                    android:textColor="#10b981"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:layout_marginTop="8dp" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- ========================================================================= -->
+    <!-- SCREEN 3: ACTIVE NATIVE CALL -->
+    <!-- ========================================================================= -->
+    <LinearLayout
+        android:id="@+id/layoutActive"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:paddingTop="32dp"
+        android:paddingBottom="24dp"
+        android:visibility="gone">
+
+        <!-- Top Timer & Connection Status -->
+        <TextView
+            android:id="@+id/txtActiveCallTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Milo AI"
+            android:textColor="#ffffff"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/txtActiveCallSubtitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Personal AI Companion"
+            android:textColor="#fbbf24"
+            android:textSize="11sp"
+            android:layout_marginTop="2dp" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_marginTop="4dp">
+
+            <TextView
+                android:id="@+id/txtCallTimer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="00:00"
+                android:textColor="#f59e0b"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text=" • LIVE AUDIO MESH"
+                android:textColor="#10b981"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- Native Ambient Glowing AI Orb -->
+        <ai.milo.nativecall.PulsingOrbView
+            android:id="@+id/pulsingOrb"
+            android:layout_width="190dp"
+            android:layout_height="190dp"
+            android:layout_marginTop="20dp"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <!-- Pure Native 2D Canvas Audio Waveform Visualizer -->
+        <ai.milo.nativecall.WaveformVisualizerView
+            android:id="@+id/waveformVisualizer"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="16dp" />
+
+        <!-- Push-to-Talk / Hold-to-Speak Button -->
+        <Button
+            android:id="@+id/btnPushToTalk"
+            android:layout_width="wrap_content"
+            android:layout_height="42dp"
+            android:text="🎙️ Hold or Tap to Speak"
+            android:textColor="#fcd34d"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:background="@drawable/btn_ptt"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp"
+            android:layout_marginTop="14dp" />
+
+        <!-- Floating Glass Speech Bubble -->
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="16dp"
+            android:background="@drawable/bg_glass_card"
+            android:padding="16dp">
+
+            <TextView
+                android:id="@+id/txtSpeechBubble"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Ready to brainstorm, Jeffy. Speak freely!"
+                android:textColor="#cbd5e1"
+                android:textSize="13sp"
+                android:lineSpacingExtra="4dp" />
+        </ScrollView>
+
+        <!-- FLOATING CONTROLS CAPSULE (Mute, End Call, Speaker) -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:background="@drawable/bg_floating_controls"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp"
+            android:paddingTop="12dp"
+            android:paddingBottom="12dp">
+
+            <!-- Mute Button -->
+            <FrameLayout
+                android:id="@+id/btnMute"
+                android:layout_width="50dp"
+                android:layout_height="50dp"
+                android:background="@drawable/btn_control"
+                android:clickable="true"
+                android:focusable="true"
+                android:layout_marginEnd="20dp">
+
+                <TextView
+                    android:id="@+id/txtMuteIcon"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:text="🎙️"
+                    android:textSize="18sp" />
+            </FrameLayout>
+
+            <!-- End Call (Large Red) -->
+            <FrameLayout
+                android:id="@+id/btnEndCall"
+                android:layout_width="64dp"
+                android:layout_height="64dp"
+                android:background="@drawable/btn_end_call"
+                android:clickable="true"
+                android:focusable="true">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:text="📵"
+                    android:textSize="22sp" />
+            </FrameLayout>
+
+            <!-- Speakerphone -->
+            <FrameLayout
+                android:id="@+id/btnSpeaker"
+                android:layout_width="50dp"
+                android:layout_height="50dp"
+                android:background="@drawable/btn_control"
+                android:clickable="true"
+                android:focusable="true"
+                android:layout_marginStart="20dp">
+
+                <TextView
+                    android:id="@+id/txtSpeakerIcon"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:text="🔊"
+                    android:textSize="18sp" />
+            </FrameLayout>
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>
