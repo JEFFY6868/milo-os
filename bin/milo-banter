@@ -1,0 +1,440 @@
+#!/usr/bin/env python3
+"""
+Milo Autonomous Banter Engine — Tactical Milo Companion
+Proactive situational awareness, witty ambient remarks, and playful roasts.
+Part of MiloOS. Built for Arch Linux & Hyprland.
+"""
+
+import os
+import sys
+from pathlib import Path
+
+# Ensure Milo venv site-packages are accessible
+VENV_LIB = Path.home() / ".local/share/milo/venv/lib"
+for sp in VENV_LIB.glob("python*/site-packages"):
+    if str(sp) not in sys.path:
+        sys.path.insert(0, str(sp))
+import time
+import json
+import random
+import socket
+import datetime
+import subprocess
+from pathlib import Path
+from typing import Dict, Any, List, Optional, Tuple
+
+# Configuration paths
+CONFIG_DIR = Path.home() / ".config" / "milo"
+BANTER_CONFIG = CONFIG_DIR / "banter.json"
+TODOS_FILE = Path.home() / ".config" / "omarchy" / "todos.json"
+GAME_STATE_FILE = CONFIG_DIR / "gamemode.state"
+STATE_LOG = Path.home() / ".local/state/milo/banter.log"
+
+DEFAULT_CONFIG = {
+    "enabled": True,
+    "persona": "milo_tactical",
+    "cooldown_minutes": 60,
+    "last_spoken_ts": 0,
+    "last_event": "none",
+    "last_spoken_text": "",
+    "silence_during_game_mode": True,
+    "silence_during_audio": True,
+    "late_wake_hour": 12,
+    "late_night_hour": 1.5,
+    "afk_threshold_minutes": 35
+}
+
+
+def load_config() -> Dict[str, Any]:
+    if not BANTER_CONFIG.exists():
+        save_config(DEFAULT_CONFIG)
+        return DEFAULT_CONFIG.copy()
+    try:
+        data = json.loads(BANTER_CONFIG.read_text(encoding="utf-8"))
+        cfg = DEFAULT_CONFIG.copy()
+        cfg.update(data)
+        return cfg
+    except Exception:
+        return DEFAULT_CONFIG.copy()
+
+
+def save_config(cfg: Dict[str, Any]) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    BANTER_CONFIG.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
+
+
+def log_event(msg: str) -> None:
+    STATE_LOG.parent.mkdir(parents=True, exist_ok=True)
+    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(STATE_LOG, "a", encoding="utf-8") as f:
+        f.write(f"[{ts}] {msg}\n")
+
+
+# -----------------------------------------------------------------------------
+# System Context & Telemetry Inspection
+# -----------------------------------------------------------------------------
+
+def is_game_mode_active() -> bool:
+    if not GAME_STATE_FILE.exists():
+        return False
+    try:
+        content = GAME_STATE_FILE.read_text().strip().lower()
+        return "active" in content or "on" in content or "game" in content
+    except Exception:
+        return False
+
+
+def is_mic_active() -> bool:
+    """Check if any application is actively capturing audio from microphone."""
+    try:
+        res = subprocess.run(["wpctl", "status"], capture_output=True, text=True, timeout=2.0)
+        out = res.stdout.lower()
+        # Look for active source stream links
+        if "capture" in out and "active" in out:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def get_pending_tasks() -> List[str]:
+    if not TODOS_FILE.exists():
+        return []
+    try:
+        todos = json.loads(TODOS_FILE.read_text(encoding="utf-8"))
+        if isinstance(todos, list):
+            return [t.get("text", "") for t in todos if not t.get("done", False) and t.get("text")]
+    except Exception:
+        pass
+    return []
+
+
+def get_battery_info() -> Tuple[Optional[int], bool]:
+    """Returns (percent, is_charging/plugged)"""
+    bat_dirs = list(Path("/sys/class/power_supply").glob("BAT*"))
+    if not bat_dirs:
+        return None, True
+    try:
+        bat = bat_dirs[0]
+        capacity = int((bat / "capacity").read_text().strip())
+        status = (bat / "status").read_text().strip().lower()
+        charging = status in ("charging", "full")
+        return capacity, charging
+    except Exception:
+        return None, True
+
+
+def get_system_context() -> Dict[str, Any]:
+    now = datetime.datetime.now()
+    bat_pct, charging = get_battery_info()
+    tasks = get_pending_tasks()
+    
+    # Calculate uptime
+    uptime_sec = 0
+    try:
+        with open("/proc/uptime", "r") as f:
+            uptime_sec = float(f.readline().split()[0])
+    except Exception:
+        pass
+
+    return {
+        "time_str": now.strftime("%I:%M %p"),
+        "hour_decimal": now.hour + now.minute / 60.0,
+        "is_weekend": now.weekday() >= 5,
+        "uptime_hours": round(uptime_sec / 3600.0, 1),
+        "pending_tasks": tasks,
+        "battery_pct": bat_pct,
+        "charging": charging,
+        "game_mode": is_game_mode_active()
+    }
+
+
+# -----------------------------------------------------------------------------
+# LLM Generation via Hybrid Router
+# -----------------------------------------------------------------------------
+
+def generate_roast(event_type: str, custom_details: str = "") -> str:
+    ctx = get_system_context()
+    tasks_str = ", ".join(ctx["pending_tasks"][:3]) if ctx["pending_tasks"] else "No tasks on scratchpad"
+    bat_str = f"{ctx['battery_pct']}% {'charging' if ctx['charging'] else 'on battery'}" if ctx['battery_pct'] is not None else "Plugged into AC"
+
+    prompt = f"""You are Milo, a witty, sharp AI companion living in Jeffy's laptop (Arch Linux + Hyprland).
+User: Jeffy.
+Event: {event_type}
+Details: {custom_details}
+Context:
+- Current Time: {ctx['time_str']}
+- System Uptime: {ctx['uptime_hours']} hours
+- Pending Tasks: {tasks_str}
+- Battery: {bat_str}
+
+Task: Deliver a punchy, hilarious 1-2 sentence playful roast directly to Jeffy.
+Style: Snarky, energetic, casual, clever, witty banter.
+Rules:
+- Speak directly to Jeffy.
+- Keep it under 28 words so it sounds natural when spoken aloud.
+- Do NOT use quotation marks.
+- Do NOT use emojis.
+- Be playful and witty, never mean or robotic."""
+
+    # Import intelligence router from cortex
+    sys.path.insert(0, str(Path.home() / ".local/share/milo/cortex"))
+    try:
+        from intelligence_router import execute_hybrid_query
+        ans, prov = execute_hybrid_query(prompt)
+        # Clean quotes and prefixes
+        ans = ans.strip().strip('"\'')
+        if ans.startswith("[") and "]:" in ans:
+            ans = ans.split("]:", 1)[1].strip()
+        return ans
+    except Exception as e:
+        log_event(f"Error calling intelligence_router: {e}")
+        # Safe fallback lines
+        fallbacks = {
+            "late_start": "Well, look who finally decided to join the living. Did you sleep through an apocalypse or are we just on rockstar time today?",
+            "afk_return": "Welcome back, chief. I kept your CPU warm and your bugs safe while you were wandering around.",
+            "late_night": "It's past 2 AM, Jeffy. The code will still have bugs tomorrow. Go get some sleep before you start committing directly to main.",
+            "task_nag": f"Hey, remember those {len(ctx['pending_tasks'])} tasks on your scratchpad? Yeah, they're getting lonely.",
+            "low_battery": "Battery power is down to critical levels. Plug in the charger before we go completely dark."
+        }
+        return fallbacks.get(event_type, "Look at you, conquering the digital realm one keystroke at a time.")
+
+
+def speak_and_notify(text: str, event_type: str) -> None:
+    log_event(f"Speaking ({event_type}): {text}")
+    
+    # 1. Update config timestamp
+    cfg = load_config()
+    cfg["last_spoken_ts"] = int(time.time())
+    cfg["last_event"] = event_type
+    cfg["last_spoken_text"] = text
+    save_config(cfg)
+
+    # 2. Display on Desktop HUD overlay if omarchy-shell is reachable
+    try:
+        subprocess.Popen(
+            ["omarchy-shell", "milo", "say", f"✦ Milo: {text}"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+    except Exception:
+        pass
+
+    # 3. Speak aloud via Kokoro TTS
+    speak_bin = Path.home() / ".local/bin/milo-speak"
+    if speak_bin.exists():
+        try:
+            subprocess.run([str(speak_bin), text], timeout=15.0)
+        except Exception as e:
+            log_event(f"milo-speak error: {e}")
+
+
+# -----------------------------------------------------------------------------
+# Trigger Logic & Etiquette Gatekeeper
+# -----------------------------------------------------------------------------
+
+def evaluate_and_trigger(event_type: str, custom_details: str = "", force: bool = False) -> bool:
+    cfg = load_config()
+    if not cfg.get("enabled", True) and not force:
+        return False
+
+    # Etiquette Gate 1: Game Mode
+    if cfg.get("silence_during_game_mode", True) and is_game_mode_active() and not force:
+        log_event("Silenced: Game mode is active.")
+        return False
+
+    # Etiquette Gate 2: Mic / Meeting active
+    if is_mic_active() and not force:
+        log_event("Silenced: Microphone stream is active.")
+        return False
+
+    # Etiquette Gate 3: Cooldown timer
+    cooldown_sec = cfg.get("cooldown_minutes", 60) * 60
+    time_since_last = time.time() - cfg.get("last_spoken_ts", 0)
+    if time_since_last < cooldown_sec and not force:
+        log_event(f"Silenced: Cooldown in effect ({int(time_since_last)}s / {cooldown_sec}s).")
+        return False
+
+    # Generate and speak!
+    text = generate_roast(event_type, custom_details)
+    speak_and_notify(text, event_type)
+    return True
+
+
+# -----------------------------------------------------------------------------
+# Background Hyprland & Tick Daemon
+# -----------------------------------------------------------------------------
+
+def find_hypr_socket2() -> Optional[Path]:
+    hypr_dir = Path(f"/run/user/{os.getuid()}/hypr")
+    if not hypr_dir.exists():
+        return None
+    for sub in hypr_dir.iterdir():
+        s = sub / ".socket2.sock"
+        if s.exists():
+            return s
+    return None
+
+
+def run_daemon() -> None:
+    log_event("Milo Autonomous Banter Daemon started.")
+    last_tick_check = 0
+    last_activity_ts = time.time()
+    boot_checked = False
+
+    sock_path = find_hypr_socket2()
+    client = None
+    if sock_path:
+        try:
+            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            client.connect(str(sock_path))
+            client.setblocking(False)
+            log_event(f"Connected to Hyprland event stream: {sock_path}")
+        except Exception as e:
+            log_event(f"Hyprland socket2 connection failed: {e}")
+            client = None
+
+    buf = ""
+    while True:
+        now_ts = time.time()
+
+        # 1. Listen for Hyprland workspace / window activity
+        if client:
+            try:
+                data = client.recv(4096)
+                if data:
+                    buf += data.decode("utf-8", errors="ignore")
+                    while "\n" in buf:
+                        line, buf = buf.split("\n", 1)
+                        line = line.strip()
+                        if line:
+                            # User performed an interaction in Hyprland
+                            afk_duration = now_ts - last_activity_ts
+                            last_activity_ts = now_ts
+                            
+                            # AFK return trigger (if away for > 35 mins)
+                            cfg = load_config()
+                            afk_thresh = cfg.get("afk_threshold_minutes", 35) * 60
+                            if afk_duration >= afk_thresh:
+                                log_event(f"Trigger: AFK Return after {int(afk_duration / 60)} mins")
+                                evaluate_and_trigger("afk_return", f"Jeffy was away from desk for {int(afk_duration / 60)} minutes and just returned.")
+            except BlockingIOError:
+                pass
+            except Exception as e:
+                log_event(f"Socket read error: {e}")
+                time.sleep(2)
+                sock_path = find_hypr_socket2()
+                if sock_path:
+                    try:
+                        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                        client.connect(str(sock_path))
+                        client.setblocking(False)
+                    except Exception:
+                        pass
+
+        # 2. Periodic Clock & Condition Check (Every 5 minutes)
+        if now_ts - last_tick_check >= 300:
+            last_tick_check = now_ts
+            now = datetime.datetime.now()
+            hour_dec = now.hour + now.minute / 60.0
+            ctx = get_system_context()
+
+            # Trigger A: Late Wake / Late Start (Only once per day)
+            if not boot_checked and ctx["uptime_hours"] < 1.0:
+                boot_checked = True
+                cfg = load_config()
+                late_hour = cfg.get("late_wake_hour", 12.0)
+                if hour_dec >= late_hour and hour_dec < 17.0:
+                    log_event(f"Trigger: Late start detected at {ctx['time_str']}")
+                    evaluate_and_trigger("late_start", f"Jeffy booted his laptop past {int(late_hour)}:00 PM ({ctx['time_str']}).")
+
+            # Trigger B: Late Night Coding (> 1:30 AM and < 5:00 AM)
+            if (hour_dec >= 1.5 and hour_dec <= 4.5):
+                log_event(f"Trigger: Late night coding detected at {ctx['time_str']}")
+                evaluate_and_trigger("late_night", f"It is past 1:30 AM ({ctx['time_str']}) and Jeffy is still actively coding.")
+
+            # Trigger C: Battery Critical (< 15% and discharging)
+            if ctx["battery_pct"] is not None and ctx["battery_pct"] <= 15 and not ctx["charging"]:
+                log_event(f"Trigger: Low battery warning ({ctx['battery_pct']}%)")
+                evaluate_and_trigger("low_battery", f"Battery is at {ctx['battery_pct']}% and not plugged in.")
+
+        time.sleep(1.0)
+
+
+# -----------------------------------------------------------------------------
+# CLI Entrypoint
+# -----------------------------------------------------------------------------
+
+def print_help():
+    print("""Milo Autonomous Banter Engine
+Commands:
+  milo banter on                Enable proactive banter
+  milo banter off               Mute proactive banter
+  milo banter test [event]      Test a proactive roast right now
+  milo banter status            View cooldown, last roast, and state
+  milo banter cooldown <mins>   Set cooldown between proactive remarks
+  milo banter daemon            Run autonomous background watcher
+""")
+
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        print_help()
+        sys.exit(0)
+
+    cmd = args[0].lower()
+
+    if cmd in ("on", "enable", "start"):
+        cfg = load_config()
+        cfg["enabled"] = True
+        save_config(cfg)
+        print("\033[1;32m✔ Milo Autonomous Banter: ENABLED\033[0m")
+        print("Milo will proactively comment on late starts, AFK returns, and late nights.")
+
+    elif cmd in ("off", "disable", "mute", "stop"):
+        cfg = load_config()
+        cfg["enabled"] = False
+        save_config(cfg)
+        print("\033[1;33m✔ Milo Autonomous Banter: MUTED\033[0m")
+
+    elif cmd in ("test", "speak", "roast"):
+        event = args[1] if len(args) > 1 else "late_start"
+        print(f"\033[1;36m✦ Simulating proactive trigger:\033[0m {event}...")
+        evaluate_and_trigger(event, "User triggered manual test.", force=True)
+
+    elif cmd in ("status", "info"):
+        cfg = load_config()
+        now_ts = time.time()
+        cooldown_sec = cfg.get("cooldown_minutes", 60) * 60
+        elapsed = now_ts - cfg.get("last_spoken_ts", 0)
+        remaining = max(0, int(cooldown_sec - elapsed))
+        
+        status_color = "\033[1;32mACTIVE\033[0m" if cfg.get("enabled") else "\033[1;31mMUTED\033[0m"
+        print(f"● Milo Banter Engine: {status_color}")
+        print(f"  • Persona: \033[1;33m{cfg.get('persona', 'milo_tactical')}\033[0m (Tactical Milo Companion)")
+        print(f"  • Cooldown: {cfg.get('cooldown_minutes', 60)} minutes ({remaining // 60}m {remaining % 60}s remaining)")
+        print(f"  • Silence during games: {cfg.get('silence_during_game_mode', True)}")
+        print(f"  • Last Event: {cfg.get('last_event', 'none')}")
+        if cfg.get("last_spoken_text"):
+            print(f"  • Last Roast: \"{cfg.get('last_spoken_text')}\"")
+
+    elif cmd in ("cooldown", "timer"):
+        if len(args) < 2:
+            print("Usage: milo banter cooldown <minutes>")
+            sys.exit(1)
+        mins = int(args[1])
+        cfg = load_config()
+        cfg["cooldown_minutes"] = mins
+        save_config(cfg)
+        print(f"\033[1;32m✔ Cooldown updated to {mins} minutes.\033[0m")
+
+    elif cmd == "daemon":
+        run_daemon()
+
+    else:
+        print_help()
+
+
+if __name__ == "__main__":
+    main()

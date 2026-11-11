@@ -1,0 +1,16 @@
+[Unit]
+Description=Milo OpenWA WhatsApp API Gateway
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/milo/openwa
+ExecStart=/usr/bin/node dist/main
+Restart=always
+RestartSec=3
+Environment=NODE_ENV=production
+Environment=PORT=2785
+Environment=PATH=%h/.local/share/milo/venv/bin:/usr/local/bin:/usr/bin
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# MiloLang Unified Toolchain CLI (`milo`)
+# Manage, build, run, and launch MiloLang programs and MiloOS
+# ==============================================================================
+
+set -e
+MILOLANG_HOME="${HOME}/Projects/milolang"
+COMPILER="$MILOLANG_HOME/bin/miloc-stage2"
+
+function show_help() {
+    echo -e "\033[1;36m=======================================================\033[0m"
+    echo -e "\033[1;32m   🌌 MiloLang CLI Toolchain v5.1.0 (Self-Hosted)     \033[0m"
+    echo -e "\033[1;36m=======================================================\033[0m"
+    echo "Usage: milolang <subcommand> [args...]"
+    echo ""
+    echo "Subcommands:"
+    echo "  run <file.ml>       Compile and immediately run a MiloLang program"
+    echo "  build <file.ml>     Compile MiloLang program into a native binary"
+    echo "  fetch               Run the native milofetch system information tool"
+    echo "  os                  Boot MiloOS bare-metal operating system in QEMU"
+    echo "  book                Open The Book of MiloLang"
+    echo "  version             Display MiloLang compiler and runtime version"
+    echo "  help                Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  milolang run script.ml"
+    echo "  milolang build tool.ml -o mytool"
+    echo "  milolang os"
+}
+
+if [ $# -eq 0 ]; then
+    show_help
+    exit 0
+fi
+
+SUBCOMMAND="$1"
+shift
+
+case "$SUBCOMMAND" in
+    run)
+        if [ -z "$1" ]; then
+            echo -e "\033[1;31m[ERROR]\033[0m Please specify a .ml file to run. Example: milo run file.ml"
+            exit 1
+        fi
+        SRC="$1"
+        shift
+        TMP_BIN="/tmp/milo_run_$$"
+        "$COMPILER" "$SRC" --hosted -o "$TMP_BIN" > /dev/null
+        "$TMP_BIN" "$@"
+        rm -f "$TMP_BIN"
+        ;;
+    build)
+        if [ -z "$1" ]; then
+            echo -e "\033[1;31m[ERROR]\033[0m Please specify a .ml file to build. Example: milo build file.ml -o binary"
+            exit 1
+        fi
+        exec "$COMPILER" "$@" --hosted
+        ;;
+    fetch)
+        exec ${HOME}/.local/bin/milofetch
+        ;;
+    os)
+        exec "$MILOLANG_HOME/run_milo.sh" "$@"
+        ;;
+    book)
+        echo "The Book of MiloLang is available at:"
+        echo "  $MILOLANG_HOME/docs/THE_BOOK_OF_MILOLANG.md"
+        ;;
+    version|--version|-v)
+        echo "MiloLang Compiler (miloc) version 5.1.0"
+        echo "Self-Hosted on x86_64 GNU/Linux (Fixed-Point Stage 2)"
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo -e "\033[1;31m[ERROR]\033[0m Unknown subcommand '$SUBCOMMAND'"
+        echo "Run 'milo help' for usage."
+        exit 1
+        ;;
+esac

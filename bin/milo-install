@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# MiloOS Disk Installer Script
+# Automated installer for installing MiloOS from Live ISO to real drive or VM disk
+# ==============================================================================
+
+set -e
+
+COLOR_CYAN='\033[0;36m'
+COLOR_GREEN='\033[0;32m'
+COLOR_YELLOW='\033[1;33m'
+COLOR_RED='\033[0;31m'
+COLOR_BOLD='\033[1m'
+COLOR_RESET='\033[0m'
+
+clear
+echo -e "${COLOR_CYAN}${COLOR_BOLD}"
+echo "================================================================="
+echo "               ⚡ MILO-OS DISK INSTALLER ⚡                     "
+echo "================================================================="
+echo -e "${COLOR_RESET}"
+
+if [ "$EUID" -ne 0 ]; then
+    echo -e "${COLOR_RED}Please run as root: sudo milo-install${COLOR_RESET}"
+    exit 1
+fi
+
+echo -e "${COLOR_YELLOW}Available Disks:${COLOR_RESET}"
+lsblk -d -p -n -l -o NAME,SIZE,MODEL | grep -v "loop" | grep -v "airootfs"
+
+echo ""
+read -rp "Enter target disk name (e.g. /dev/vda, /dev/sda, /dev/nvme0n1): " TARGET_DISK
+
+if [ ! -b "$TARGET_DISK" ]; then
+    echo -e "${COLOR_RED}Invalid disk: $TARGET_DISK${COLOR_RESET}"
+    exit 1
+fi
+
+echo -e "\n${COLOR_RED}${COLOR_BOLD}WARNING: ALL DATA ON $TARGET_DISK WILL BE COMPLETELY ERASED!${COLOR_RESET}"
+read -rp "Are you absolutely sure you want to proceed? (yes/no): " CONFIRM
+if [ "$CONFIRM" != "yes" ]; then
+    echo "Installation aborted."
+    exit 0
+fi
+
+echo -e "\n${COLOR_CYAN}[1/6] Partitioning $TARGET_DISK with GPT...${COLOR_RESET}"
+wipefs -a "$TARGET_DISK"
+parted -s "$TARGET_DISK" mklabel gpt
+parted -s "$TARGET_DISK" mkpart ESP fat32 1MiB 513MiB
+parted -s "$TARGET_DISK" set 1 esp on
+parted -s "$TARGET_DISK" mkpart Root btrfs 513MiB 100%
+
+# Determine partition names
+if [[ "$TARGET_DISK" =~ "nvme" || "$TARGET_DISK" =~ "mmcblk" ]]; then
+    BOOT_PART="${TARGET_DISK}p1"
+    ROOT_PART="${TARGET_DISK}p2"
+else
+    BOOT_PART="${TARGET_DISK}1"
+    ROOT_PART="${TARGET_DISK}2"
+fi
+
+echo -e "\n${COLOR_CYAN}[2/6] Formatting partitions (FAT32 for ESP, Btrfs for Root)...${COLOR_RESET}"
+mkfs.vfat -F32 "$BOOT_PART"
+mkfs.btrfs -f "$ROOT_PART"
+
+echo -e "\n${COLOR_CYAN}[3/6] Mounting partitions...${COLOR_RESET}"
+mkdir -p /mnt/target
+mount "$ROOT_PART" /mnt/target
+mkdir -p /mnt/target/boot
+mount "$BOOT_PART" /mnt/target/boot
+
+echo -e "\n${COLOR_CYAN}[4/6] Copying MiloOS system to target disk...${COLOR_RESET}"
+rsync -aAX --info=progress2 --exclude={"/dev/*","/proc/*","/sys/*","/tmp/*","/run/*","/mnt/*","/media/*","/lost+found"} / /mnt/target/
+
+# Copy kernel image to target disk
+KERNEL_SRC=$(find /mnt/target/usr/lib/modules -name "vmlinuz" 2>/dev/null | head -n 1)
+[ -z "$KERNEL_SRC" ] && KERNEL_SRC=$(find /usr/lib/modules -name "vmlinuz" 2>/dev/null | head -n 1)
+[ -z "$KERNEL_SRC" ] && KERNEL_SRC=$(find /run/archiso -name "*vmlinuz*" 2>/dev/null | head -n 1)
+
+if [ -n "$KERNEL_SRC" ]; then
+    echo "Installing kernel from $KERNEL_SRC..."
+    cp -v "$KERNEL_SRC" /mnt/target/boot/vmlinuz-linux
+else
+    echo -e "${COLOR_RED}ERROR: vmlinuz kernel binary not found!${COLOR_RESET}"
+    exit 1
+fi
+
+# Copy CPU microcode if present
+find /run/archiso /usr/lib/firmware /boot -name "*ucode*.img" -exec cp -v {} /mnt/target/boot/ \; 2>/dev/null || true
+
+# Remove live-only archiso hooks to enable standard installed mkinitcpio
+rm -f /mnt/target/etc/mkinitcpio.conf.d/archiso.conf
+
+# Ensure Omarchy & Milo executable binaries have full execution permissions
+chmod 755 /mnt/target/usr/bin/omarchy* /mnt/target/usr/local/bin/milo* /mnt/target/usr/local/bin/ag* 2>/dev/null || true
+chmod -R 755 /mnt/target/usr/share/omarchy 2>/dev/null || true
+
+echo -e "\n${COLOR_CYAN}[5/6] Building installed initramfs with mkinitcpio...${COLOR_RESET}"
+arch-chroot /mnt/target mkinitcpio -P
+
+echo -e "\n${COLOR_CYAN}[6/6] Installing Bootloader (systemd-boot) & Configuring System...${COLOR_RESET}"
+arch-chroot /mnt/target bootctl --path=/boot install
+
+PARTUUID=$(blkid -s PARTUUID -o value "$ROOT_PART")
+cat <<EOF > /mnt/target/boot/loader/entries/miloos.conf
+title   MiloOS (AI-Native Operating System)
+linux   /vmlinuz-linux
+EOF
+
+# Add microcode entries if files exist in /boot
+[ -f /mnt/target/boot/intel-ucode.img ] && echo "initrd  /intel-ucode.img" >> /mnt/target/boot/loader/entries/miloos.conf
+[ -f /mnt/target/boot/amd-ucode.img ] && echo "initrd  /amd-ucode.img" >> /mnt/target/boot/loader/entries/miloos.conf
+echo "initrd  /initramfs-linux.img" >> /mnt/target/boot/loader/entries/miloos.conf
+echo "options root=PARTUUID=${PARTUUID} rw quiet splash" >> /mnt/target/boot/loader/entries/miloos.conf
+
+cat <<EOF > /mnt/target/boot/loader/loader.conf
+default miloos.conf
+timeout 3
+console-mode max
+EOF
+
+# Generate filesystem table
+genfstab -U /mnt/target > /mnt/target/etc/fstab
+
+# Enable critical hardware and networking services for installed OS
+arch-chroot /mnt/target systemctl enable NetworkManager.service 2>/dev/null || true
+arch-chroot /mnt/target systemctl enable sddm.service 2>/dev/null || true
+arch-chroot /mnt/target systemctl enable bluetooth.service 2>/dev/null || true
+arch-chroot /mnt/target systemctl set-default graphical.target 2>/dev/null || true
+
+# Set hostname
+echo "milo-pc" > /mnt/target/etc/hostname
+
+# Unmount cleanly
+umount -R /mnt/target
+
+echo -e "\n${COLOR_GREEN}${COLOR_BOLD}=================================================================${COLOR_RESET}"
+echo -e "${COLOR_GREEN}${COLOR_BOLD}🎉 MiloOS SUCCESSFULLY INSTALLED TO $TARGET_DISK!${COLOR_RESET}"
+echo -e "${COLOR_GREEN}${COLOR_BOLD}=================================================================${COLOR_RESET}"
+echo "You can now reboot. Remove the live USB / CD to boot directly from your new disk!"

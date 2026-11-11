@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Milo Cortex Floating HUD — Interactive Copilot with Power Tools
+# Part of MiloOS. Built for Arch Linux & Hyprland.
+# ==============================================================================
+set -e
+
+PYTHON_BIN="${HOME}/.local/share/milo/venv/bin/python3"
+if [ ! -x "$PYTHON_BIN" ]; then
+    PYTHON_BIN="python3"
+fi
+
+HUD_SCRIPT="${HOME}/.local/share/milo/cortex/hud_interactive.py"
+
+exec foot -T "Milo Cortex — Cognitive Copilot" \
+          --app-id="milo-cortex-hud" \
+          -w 980x640 \
+          "$PYTHON_BIN" "$HUD_SCRIPT" "$@"

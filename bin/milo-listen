@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+"""
+Milo Voice Dictation (milo-listen)
+Push-to-talk & toggle voice dictation powered by Phonon-2 (offline ASR).
+Bound to SUPER + V in Hyprland.
+
+Operation:
+- Press SUPER + V: Begins recording microphone via PipeWire.
+- Press SUPER + V again: Stops recording immediately, runs Phonon-2 transcription,
+  copies text to clipboard (wl-copy) and types it into the active window (wtype).
+"""
+
+import sys
+import os
+import re
+import time
+import signal
+import subprocess
+from pathlib import Path
+
+PHONON_DIR = Path.home() / ".local/share/milo/phonon"
+if str(PHONON_DIR) not in sys.path:
+    sys.path.insert(0, str(PHONON_DIR))
+
+ENV_SITE_PACKAGES = Path.home() / ".local/share/milo/phonon-env/lib/python3.12/site-packages"
+if ENV_SITE_PACKAGES.exists() and str(ENV_SITE_PACKAGES) not in sys.path:
+    sys.path.insert(0, str(ENV_SITE_PACKAGES))
+
+import client
+
+PID_FILE = Path(f"/tmp/milo-listen-{os.getuid()}.pid")
+AUDIO_FILE = Path(f"/tmp/milo-listen-{os.getuid()}.wav")
+
+
+def notify(summary: str, body: str = "", timeout: int = 1500):
+    """Desktop notification via notify-send."""
+    try:
+        subprocess.run(
+            ["notify-send", "-t", str(timeout), "-a", "Milo Dictation", summary, body],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+    except Exception:
+        pass
+
+
+def inject_text(text: str):
+    """Copy text to clipboard and type into the focused Wayland window."""
+    if not text.strip():
+        return
+
+    # Copy to clipboard
+    try:
+        subprocess.run(["wl-copy", text], check=True)
+    except Exception as e:
+        print(f"Clipboard error: {e}", file=sys.stderr)
+
+    time.sleep(0.08)
+
+    # Type into active window
+    try:
+        subprocess.run(["wtype", "-d", "2", text], check=True)
+    except Exception:
+        try:
+            # Fallback paste
+            subprocess.run(["wtype", "-M", "ctrl", "-M", "shift", "-k", "v", "-m", "shift", "-m", "ctrl"], check=False)
+        except Exception:
+            pass
+
+
+def main():
+    # Toggle Check: If already recording, stop it!
+    if PID_FILE.exists():
+        try:
+            pid = int(PID_FILE.read_text().strip())
+            PID_FILE.unlink(missing_ok=True)
+            os.kill(pid, signal.SIGINT)
+            print("🛑 Stopped recording.")
+            sys.exit(0)
+        except (ProcessLookupError, ValueError):
+            PID_FILE.unlink(missing_ok=True)
+
+    # Clean old audio file
+    if AUDIO_FILE.exists():
+        AUDIO_FILE.unlink()
+
+    # Launch PipeWire recording subprocess
+    cmd = [
+        "pw-record",
+        "--rate", "16000",
+        "--channels", "1",
+        "--format", "s16",
+        str(AUDIO_FILE)
+    ]
+
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        PID_FILE.write_text(str(proc.pid))
+    except Exception as e:
+        # Fallback to arecord if pw-record is unavailable
+        cmd = ["arecord", "-f", "S16_LE", "-r", "16000", "-c", "1", str(AUDIO_FILE)]
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            PID_FILE.write_text(str(proc.pid))
+        except Exception as e2:
+            notify("❌ Dictation Error", f"Recording failed: {e2}")
+            sys.exit(1)
+
+    notify("🎙️ Milo Listening...", "Speak now... (Press SUPER+V again to transcribe)", timeout=3000)
+    print("🎙️ Listening... Press SUPER+V or Ctrl+C to stop.")
+
+    # Max duration safeguard: 45 seconds
+    max_wait = 45.0
+    start_t = time.time()
+
+    try:
+        while proc.poll() is None:
+            time.sleep(0.1)
+            if (time.time() - start_t) >= max_wait:
+                proc.send_signal(signal.SIGINT)
+                break
+    except KeyboardInterrupt:
+        proc.send_signal(signal.SIGINT)
+
+    PID_FILE.unlink(missing_ok=True)
+    proc.wait()
+
+    if not AUDIO_FILE.exists() or AUDIO_FILE.stat().st_size < 1000:
+        print("No audio captured.")
+        sys.exit(0)
+
+    notify("⚡ Transcribing...", "Decoding speech via Phonon-2...", timeout=1200)
+
+    t0 = time.time()
+    res = client.request_transcribe_file(AUDIO_FILE)
+    text = res.get("text", "").strip()
+    wall = time.time() - t0
+
+    if text:
+        print(f"\n--- Transcribed in {wall:.2f}s ---\n{text}\n")
+        # Save to dictation file for Milo Wallpaper / HUD watcher
+        try:
+            dictation_file = Path("/tmp/milo-dictation-last.txt")
+            dictation_file.write_text(text, encoding="utf-8")
+        except Exception:
+            pass
+
+        cleaned_lower = text.lower().strip()
+        # Voice Directive Interceptor for Milo Evolution Protocol
+        if any(kw in cleaned_lower for kw in ["authorize upgrade", "apply evolution", "authorize evolution", "apply upgrade", "milo authorize", "milo apply"]):
+            notify("✦ Milo Evolution", "Voice Authorization Confirmed. Applying upgrade...", timeout=2500)
+            subprocess.run([str(Path.home() / ".local/bin/milo-evolve"), "approve"], check=False)
+            return
+        elif any(kw in cleaned_lower for kw in ["defer upgrade", "defer evolution", "dismiss evolution", "dismiss upgrade"]):
+            notify("✦ Milo Evolution", "Voice Directive: Evolution Deferred.", timeout=2500)
+            subprocess.run([str(Path.home() / ".local/bin/milo-evolve"), "defer"], check=False)
+            return
+        elif any(kw in cleaned_lower for kw in ["scan codebase", "audit codebase", "scan your codebase", "audit yourself", "weak areas", "what needs to be improved", "what can be improved"]):
+            notify("✦ Milo Forensic Audit", "Scanning 70+ components for weak areas...", timeout=2500)
+            subprocess.Popen(["foot", "-a", "milo-floating", "-T", "MILO // Codebase Forensic Auditor", str(Path.home() / ".local/bin/milo-evolve"), "audit"])
+            return
+        elif any(cleaned_lower.startswith(p) for p in ["build me ", "create a tool ", "make a tool ", "build a tool ", "milo wish ", "wish for "]) or "build a script" in cleaned_lower:
+            wish_query = re.sub(r"^(?:milo\s+)?(?:build\s+(?:me\s+)?(?:a\s+)?|create\s+(?:a\s+)?|make\s+(?:a\s+)?|wish\s+for\s+)", "", cleaned_lower, flags=re.IGNORECASE).strip()
+            notify("✨ Milo Wish Genesis", f"Generating: {wish_query[:35]}...", timeout=2500)
+            subprocess.Popen(["foot", "-a", "milo-floating", "-T", "MILO // Thought-to-Code Genesis", str(Path.home() / ".local/bin/milo-evolve"), "wish", wish_query])
+            return
+        elif any(kw in cleaned_lower for kw in ["milo evolve", "milo upgrade", "plan upgrade", "check upgrade", "self upgrade"]):
+            notify("✦ Milo Evolution", "Analyzing diagnostics & planning upgrade...", timeout=2500)
+            subprocess.run([str(Path.home() / ".local/bin/milo-evolve"), "plan"], check=False)
+            return
+
+        inject_text(text)
+        notify("✍️ Dictated", text, timeout=3500)
+    else:
+        notify("Milo Dictation", "No speech recognized.", timeout=1500)
+
+
+if __name__ == "__main__":
+    main()

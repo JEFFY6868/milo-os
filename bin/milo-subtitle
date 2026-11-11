@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+"""
+Milo Creator Studio Subtitler (milo-subtitle)
+Lightning-fast (<150x realtime) subtitle generator (.srt / .vtt) for video editing.
+Powered by Phonon-2 2.1-bit QAT ASR.
+
+Usage:
+    milo-subtitle video.mp4
+    milo-subtitle take1.mp4 --format vtt
+    milo-subtitle podcast.wav --hotwords "Milo, Arch Linux, Hyprland"
+    milo-subtitle short.mp4 --words  # Generates word-level timestamps for animated captions
+"""
+
+import sys
+import os
+import time
+import json
+import argparse
+import tempfile
+import subprocess
+from pathlib import Path
+
+# Ensure phonon directory is in sys.path
+PHONON_DIR = Path.home() / ".local/share/milo/phonon"
+if str(PHONON_DIR) not in sys.path:
+    sys.path.insert(0, str(PHONON_DIR))
+
+import engine
+import client
+
+
+def extract_audio(media_path: Path, output_wav: Path) -> bool:
+    """Extract 16kHz mono PCM audio from video using FFmpeg."""
+    cmd = [
+        "ffmpeg", "-y", "-v", "error",
+        "-i", str(media_path),
+        "-vn",
+        "-ar", "16000",
+        "-ac", "1",
+        "-c:a", "pcm_s16le",
+        str(output_wav)
+    ]
+    try:
+        subprocess.run(cmd, check=True)
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"❌ FFmpeg audio extraction failed: {e}", file=sys.stderr)
+        return False
+
+
+def generate_word_srt(words: list) -> str:
+    """Generate rapid word-by-word subtitles for short-form social/reel animations."""
+    lines = []
+    idx = 1
+    for w in words:
+        txt = w.get("text", "").strip()
+        if not txt:
+            continue
+        start_t = engine.format_timestamp_srt(w.get("start", 0.0))
+        end_t = engine.format_timestamp_srt(w.get("end", 0.0))
+        lines.append(f"{idx}")
+        lines.append(f"{start_t} --> {end_t}")
+        lines.append(txt)
+        lines.append("")
+        idx += 1
+    return "\n".join(lines)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Milo Creator Studio Fast Subtitler (Phonon-2)")
+    parser.add_argument("input", help="Target video or audio file (.mp4, .mov, .mkv, .wav, .mp3, etc.)")
+    parser.add_argument("--format", choices=["srt", "vtt", "all", "json"], default="srt", help="Subtitle format (default: srt)")
+    parser.add_argument("--output", "-o", default=None, help="Output file path (default: input with new extension)")
+    parser.add_argument("--hotwords", default=None, help="Comma-separated custom hotwords (e.g. 'Milo, Hyprland, OnePlus')")
+    parser.add_argument("--words", action="store_true", help="Generate word-level timestamp subtitles (.words.srt)")
+
+    args = parser.parse_args()
+
+    input_path = Path(args.input).expanduser().resolve()
+    if not input_path.is_file():
+        print(f"❌ Input file not found: {input_path}", file=sys.stderr)
+        sys.exit(1)
+
+    hotwords_list = [w.strip() for w in args.hotwords.split(",")] if args.hotwords else None
+
+    print(f"🎬 [Milo Subtitle] Processing: {input_path.name}")
+    t0 = time.time()
+
+    # Determine if input is already a 16kHz WAV or requires FFmpeg extraction
+    suffix = input_path.suffix.lower()
+    temp_wav = None
+
+    if suffix == ".wav":
+        audio_target = input_path
+    else:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            temp_wav = Path(tmp.name)
+        print("  ⏳ Extracting 16kHz mono audio via FFmpeg...")
+        if not extract_audio(input_path, temp_wav):
+            if temp_wav.exists():
+                temp_wav.unlink()
+            sys.exit(1)
+        audio_target = temp_wav
+
+    try:
+        print("  ⚡ Running Phonon-2 speech transcription...")
+        res = client.request_transcribe_file(audio_target, hotwords=hotwords_list)
+        if res.get("status") == "error":
+            print(f"❌ Transcription error: {res.get('message')}", file=sys.stderr)
+            sys.exit(1)
+
+        duration = res.get("duration_seconds", 0.0)
+        decode_time = res.get("decode_seconds", 0.0)
+        rtf = res.get("realtime_factor", (duration / decode_time) if decode_time > 0 else 0.0)
+
+        print(f"  ✅ Transcribed {duration:.2f}s audio in {decode_time:.2f}s ({rtf:.1f}x realtime)!")
+        print(f"  📝 Detected {res.get('segment_count', 0)} subtitle segments.")
+
+        # Save requested formats
+        base_output = Path(args.output).expanduser().resolve() if args.output else input_path.with_suffix("")
+
+        if args.format in ("srt", "all"):
+            srt_content = engine.PhononEngine.generate_srt(None, res)
+            srt_path = base_output.with_suffix(".srt")
+            srt_path.write_text(srt_content, encoding="utf-8")
+            print(f"  💾 SubRip (.srt) saved: {srt_path}")
+
+        if args.format in ("vtt", "all"):
+            vtt_content = engine.PhononEngine.generate_vtt(None, res)
+            vtt_path = base_output.with_suffix(".vtt")
+            vtt_path.write_text(vtt_content, encoding="utf-8")
+            print(f"  💾 WebVTT (.vtt) saved: {vtt_path}")
+
+        if args.format == "json":
+            json_path = base_output.with_suffix(".json")
+            json_path.write_text(json.dumps(res, indent=2), encoding="utf-8")
+            print(f"  💾 JSON transcript saved: {json_path}")
+
+        if args.words:
+            word_srt = generate_word_srt(res.get("words", []))
+            word_path = base_output.with_name(f"{base_output.stem}.words.srt")
+            word_path.write_text(word_srt, encoding="utf-8")
+            print(f"  💾 Word-level SubRip saved: {word_path}")
+
+        total_wall = time.time() - t0
+        print(f"\n🎉 Completed in {total_wall:.2f}s total wall-clock time.")
+
+    finally:
+        if temp_wav and temp_wav.exists():
+            temp_wav.unlink()
+
+
+if __name__ == "__main__":
+    main()

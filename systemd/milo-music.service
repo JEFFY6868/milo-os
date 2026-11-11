@@ -1,0 +1,13 @@
+[Unit]
+Description=Stark Repulsor Soundtrack Engine (Local Music Vault)
+After=sound.target
+
+[Service]
+Type=simple
+ExecStartPre=%h/.local/bin/milo-music shuffle
+ExecStart=/usr/bin/mpv --no-video --idle=yes --input-ipc-server=/tmp/milo-mpv.sock --scripts=%h/.config/mpv/scripts/mpris.so --playlist=%h/.config/milo/soundtrack.m3u --shuffle --loop-playlist=inf --pause
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

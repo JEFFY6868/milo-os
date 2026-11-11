@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "persona": "milo_tactical",
+  "cooldown_minutes": 60,
+  "last_spoken_ts": 1794348317,
+  "last_event": "late_night",
+  "last_spoken_text": "Jeffy, it\u2019s three-thirty and your eyes are basically filing a formal complaint with HR. Even your code looks tired, so maybe sleep before the compiler starts judging you personally.",
+  "silence_during_game_mode": true,
+  "silence_during_audio": true,
+  "late_wake_hour": 12,
+  "late_night_hour": 1.5,
+  "afk_threshold_minutes": 35
+}

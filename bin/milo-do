@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Milo Autonomous Vision-Action Loop CLI
+set -eo pipefail
+
+VENV_PY="${HOME}/.local/share/cua/venv/bin/python"
+SCRIPT="${HOME}/.local/share/milo/milo_do.py"
+
+export DISPLAY="${DISPLAY:-:0}"
+export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/1000}"
+
+if [[ -z "$*" ]]; then
+  echo "Usage: milo do \"<task goal>\" [options]"
+  echo "Example: milo do \"Open Firefox and check today's headlines\""
+  exit 1
+fi
+
+exec "$VENV_PY" "$SCRIPT" "$@"

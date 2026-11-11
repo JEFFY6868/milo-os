@@ -1,0 +1,16 @@
+[Unit]
+Description=Milo Phonon Speech Recognition Daemon (Phonon-2 ASR)
+Documentation=file://%h/.local/share/milo/phonon/daemon.py
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/milo/phonon-env/bin/python %h/.local/share/milo/phonon/daemon.py
+Restart=always
+RestartSec=2s
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

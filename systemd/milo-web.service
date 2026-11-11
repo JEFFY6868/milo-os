@@ -1,0 +1,14 @@
+[Unit]
+Description=MiloLang Native Web Engine & HTTP Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/milo-web
+Restart=always
+RestartSec=1
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

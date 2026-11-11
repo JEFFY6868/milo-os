@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    cat <<EOF
+Milo Workspace Time Tracker
+Tracks duration spent on active Hyprland workspaces.
+
+Usage:
+  milo-workspace-time [start|stop|status|clear]
+
+Commands:
+  start    Start tracking (daemonizes)
+  stop     Stop tracking
+  status   Show current tracking session stats
+  clear    Clear history
+EOF
+    exit 0
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    usage
+fi
+
+DATA_DIR="$HOME/.local/share/milo-workspace-time"
+LOG_FILE="$DATA_DIR/active.log"
+PID_FILE="$DATA_DIR/daemon.pid"
+
+mkdir -p "$DATA_DIR"
+
+get_active_ws() {
+    hyprctl -j activeworkspace | jq -r '.id'
+}
+
+start_tracker() {
+    if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+        echo "Tracker already running (PID: $(cat "$PID_FILE"))"
+        return 1
+    fi
+
+    echo "Starting workspace tracker..."
+    (
+        LAST_WS=""
+        LAST_TS=$(date +%s)
+        
+        while true; do
+            CURRENT_WS=$(get_active_ws)
+            NOW=$(date +%s)
+            
+            if [[ -n "$LAST_WS" && "$LAST_WS" != "$CURRENT_WS" ]]; then
+                DURATION=$((NOW - LAST_TS))
+                echo "$LAST_WS $DURATION" >> "$LOG_FILE"
+                LAST_TS=$NOW
+            fi
+            LAST_WS=$CURRENT_WS
+            sleep 1
+        done
+    ) &
+    echo $! > "$PID_FILE"
+    echo "Tracker started (PID: $(cat "$PID_FILE"))"
+}
+
+stop_tracker() {
+    if [[ -f "$PID_FILE" ]]; then
+        PID=$(cat "$PID_FILE")
+        if kill -0 "$PID" 2>/dev/null; then
+            kill "$PID"
+            echo "Tracker stopped."
+        else
+            echo "Tracker not running."
+        fi
+        rm -f "$PID_FILE"
+    else
+        echo "No active tracker found."
+    fi
+}
+
+show_status() {
+    if [[ -f "$LOG_FILE" && -s "$LOG_FILE" ]]; then
+        echo "Workspace Time Summary:"
+        awk '{sum[$1] += $2} END {for (ws in sum) printf "Workspace %s: %d seconds\n", ws, sum[ws]}' "$LOG_FILE" | sort -t: -k2 -rn
+    else
+        echo "No data recorded yet."
+    fi
+}
+
+case "${1:-}" in
+    start)
+        start_tracker
+        ;;
+    stop)
+        stop_tracker
+        ;;
+    status)
+        show_status
+        ;;
+    clear)
+        rm -f "$LOG_FILE"
+        echo "History cleared."
+        ;;
+    *)
+        usage
+        ;;
+esac

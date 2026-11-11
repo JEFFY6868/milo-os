@@ -1,0 +1,14 @@
+[Unit]
+Description=Milo Autonomous Banter & Situational Roaster Engine
+Documentation=file://%h/.local/bin/milo-banter
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/milo/venv/bin/python3 %h/.local/bin/milo-banter daemon
+Restart=always
+RestartSec=5
+Environment=PATH=%h/.gemini/antigravity-cli/bin:/usr/share/omarchy/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=default.target

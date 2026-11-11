@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# ==============================================================================
+# milo-code: Claude Code CLI hooked to OmniRoute Local AI Gateway ($0 Cost)
+# Part of MiloOS. Built for Arch Linux & Hyprland.
+# ==============================================================================
+
+# Health Check & Self-Healing: Ensure OmniRoute gateway is active on port 20128
+check_omniroute() {
+    (echo >/dev/tcp/127.0.0.1/20128) >/dev/null 2>&1
+}
+
+if ! check_omniroute; then
+    # Attempt 1: Start systemd user service if available
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl --user start milo-omniroute 2>/dev/null || true
+    fi
+
+    # Attempt 2: If still down (or systemd user bus inactive), spawn daemon directly
+    if ! check_omniroute; then
+        if [ -f ${HOME}/.config/milo/keys.env ]; then
+            set -a
+            source ${HOME}/.config/milo/keys.env
+            set +a
+        fi
+        nohup ${HOME}/.local/bin/omniroute serve --port 20128 --no-open --headless >/tmp/omniroute.log 2>&1 &
+    fi
+
+    # Wait up to 3 seconds for gateway to bind port
+    for _ in {1..15}; do
+        if check_omniroute; then
+            break
+        fi
+        sleep 0.2
+    done
+fi
+
+export ANTHROPIC_BASE_URL="http://127.0.0.1:20128"
+export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-local-proxy-token}"
+unset ANTHROPIC_AUTH_TOKEN
+
+export ANTHROPIC_MODEL="claude-3-5-sonnet"
+
+# Check if model flag was passed explicitly
+HAS_MODEL=0
+for arg in "$@"; do
+    if [ "$arg" = "--model" ]; then
+        HAS_MODEL=1
+        break
+    fi
+done
+
+if [ $HAS_MODEL -eq 0 ]; then
+    exec ${HOME}/.local/bin/claude --model claude-3-5-sonnet "$@"
+else
+    exec ${HOME}/.local/bin/claude "$@"
+fi

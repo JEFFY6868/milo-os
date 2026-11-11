@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# MiloOS Interactive Snipping Tool (Grim + Slurp + Swappy)
+set -eo pipefail
+
+SAVE_DIR="${HOME}/Pictures/Screenshots"
+mkdir -p "$SAVE_DIR"
+TIMESTAMP=$(date +'%Y-%m-%d_%H-%M-%S')
+FILEPATH="${SAVE_DIR}/screenshot-${TIMESTAMP}.png"
+
+# Slurp with MiloOS Electric Cyan selection border
+SELECTION=$(slurp -b 00000055 -c 00f5ffee -s 00f5ff22 -w 2 2>/dev/null || true)
+
+if [[ -z "$SELECTION" ]]; then
+  exit 0
+fi
+
+# Capture region
+grim -g "$SELECTION" "$FILEPATH"
+wl-copy --type image/png < "$FILEPATH"
+
+# If --edit passed or launched as interactive snippet, open Swappy editor
+if [[ "$1" == "--edit" || "$1" == "-e" ]]; then
+  swappy -f "$FILEPATH"
+else
+  notify-send -a "MiloOS" -i "$FILEPATH" "Screenshot Captured" "Saved to ~/Pictures/Screenshots & copied to clipboard."
+fi

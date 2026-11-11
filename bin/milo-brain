@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Milo Semantic Brain — Universal Vault & Desktop Semantic Search Engine
+# Part of MiloOS. Built for Arch Linux & Hyprland.
+# ==============================================================================
+set -e
+
+export QT_QPA_PLATFORM=wayland
+export PYTHONPATH="/usr/lib/python3.14/site-packages:${PYTHONPATH}"
+
+PYTHON_BIN="${HOME}/.local/share/milo/venv/bin/python3"
+if [ ! -x "$PYTHON_BIN" ]; then
+    PYTHON_BIN="python3"
+fi
+
+exec "$PYTHON_BIN" ${HOME}/.local/share/milo/brain/milo_brain_cli.py "$@"

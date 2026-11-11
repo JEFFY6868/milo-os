@@ -1,0 +1,16 @@
+#!/bin/bash
+set -euo pipefail
+# ~/.local/bin/milo-web-app - Launch MiloLang Native Web Engine & GUI Window
+
+# Check if milo-web server is already running
+if ! pgrep -f "${HOME}/.local/bin/milo-web" >/dev/null 2>&1; then
+    ${HOME}/.local/bin/milo-web >/dev/null 2>&1 &
+    sleep 0.4
+fi
+
+# Open as a dedicated standalone App Window (Chromium or default browser)
+if which chromium >/dev/null 2>&1; then
+    exec chromium --app="http://127.0.0.1:7777" --class="milo-web-app" "$@"
+else
+    exec xdg-open "http://127.0.0.1:7777"
+fi

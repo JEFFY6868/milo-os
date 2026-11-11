@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""
+Milo Automount Daemon
+Listens for MTP devices (Android phones) and removable drives via GIO,
+automounts them, and sends a notification.
+"""
+import subprocess
+import re
+import time
+import os
+import sys
+
+def mount_internal_storage():
+    """Ensure internal 1TB storage drive (/dev/sda2) is mounted."""
+    try:
+        subprocess.run(["udisksctl", "mount", "-b", "/dev/sda2", "--no-user-interaction"], capture_output=True, timeout=5)
+    except Exception:
+        pass
+
+
+def mount_all_unmounted():
+    mount_internal_storage()
+    try:
+        proc = subprocess.run(["gio", "mount", "-li"], capture_output=True, text=True, timeout=5)
+        blocks = proc.stdout.split("Volume(")
+        for b in blocks[1:]:
+            if "Type: GProxyVolume (GProxyVolumeMonitorMTP)" in b:
+                if "Mount(" not in b:
+                    m = re.search(r"activation_root=(mtp://\S+)", b)
+                    if m:
+                        uri = m.group(1).rstrip("/") + "/"
+                        subprocess.run(["gio", "mount", uri], capture_output=True, text=True, timeout=8)
+                        lines = b.strip().split("\n")
+                        name_match = re.search(r"^\d+\):\s*(.+)$", lines[0])
+                        dev_name = name_match.group(1) if name_match else "Android Phone"
+                        subprocess.run([
+                            "notify-send",
+                            "-a", "Milo Files",
+                            "-i", "phone",
+                            "📱 Android Device Connected",
+                            f"Mounted {dev_name} for file transfer in Milo Files"
+                        ])
+    except Exception as e:
+        pass
+
+def main():
+    mount_all_unmounted()
+    while True:
+        try:
+            mon = subprocess.Popen(["gio", "mount", "-o"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+            for line in mon.stdout:
+                if "Volume added:" in line or "Drive added:" in line or "Volume changed:" in line:
+                    time.sleep(0.5)
+                    mount_all_unmounted()
+        except Exception:
+            time.sleep(3)
+
+if __name__ == "__main__":
+    main()

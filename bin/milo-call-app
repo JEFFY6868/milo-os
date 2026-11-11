@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Milo AI Live Call — Native Desktop App Launcher
+set -eo pipefail
+
+APP_URL="http://127.0.0.1:3140/call"
+PROFILE_DIR="${HOME}/.local/state/milo/call/profile"
+mkdir -p "$PROFILE_DIR"
+
+# Clean stale singleton lock
+if ! pgrep -f "user-data-dir=${PROFILE_DIR}" >/dev/null; then
+  rm -f "${PROFILE_DIR}/Singleton"* 2>/dev/null || true
+fi
+
+# Ensure Studio service is active
+systemctl --user start milo-kino-studio.service >/dev/null 2>&1
+
+# Check if already running in Hyprland
+if hyprctl clients -j 2>/dev/null | grep -qi 'Milo AI — Live Voice Call'; then
+  hyprctl dispatch 'hl.dsp.focus({ window = "title:Milo AI — Live Voice Call" })' >/dev/null 2>&1
+  exit 0
+fi
+
+# Launch as dedicated Wayland desktop application
+if command -v chromium >/dev/null 2>&1; then
+  setsid chromium \
+    --app="${APP_URL}" \
+    --class="milo-call" \
+    --name="milo-call" \
+    --user-data-dir="${PROFILE_DIR}" \
+    --ozone-platform=wayland \
+    --enable-features=UseOzonePlatform \
+    --enable-gpu-rasterization \
+    --force-dark-mode \
+    --autoplay-policy=no-user-gesture-required \
+    --disable-sync \
+    --no-first-run \
+    --no-default-browser-check \
+    --window-size=450,720 \
+    "$@" >/dev/null 2>&1 &
+elif command -v zen-browser >/dev/null 2>&1; then
+  setsid zen-browser --new-window "${APP_URL}" >/dev/null 2>&1 &
+else
+  xdg-open "${APP_URL}" >/dev/null 2>&1 &
+fi

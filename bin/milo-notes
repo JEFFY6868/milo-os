@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Milo Notes — Native Markdown Knowledge Studio & Fast CLI
+# Part of MiloOS. Built for Arch Linux & Hyprland.
+# ==============================================================================
+set -e
+
+# If user explicitly asks for CLI/TUI or subcommands (new, list, search, view)
+if [[ "$1" == "--tui" || "$1" == "--cli" || "$1" == "list" || "$1" == "search" || "$1" == "new" || "$1" == "view" ]]; then
+  if [ -x "$HOME/.local/bin/milo-notes-cli" ]; then
+    if [[ "$1" == "--tui" || "$1" == "--cli" ]]; then
+      shift
+    fi
+    exec "$HOME/.local/bin/milo-notes-cli" "$@"
+  fi
+fi
+
+# Otherwise, launch the Native 3-Pane Markdown Studio
+export QT_QPA_PLATFORM=wayland
+export QT_STYLE_OVERRIDE=Fusion
+export QT_LOGGING_RULES="qt.qpa.wayland.textinput=false;qt.qpa.services=false;qt.qpa.*=false"
+exec python3 ${HOME}/.local/share/milo/notes/milo_notes_native.py "$@" 2>/dev/null

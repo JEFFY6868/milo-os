@@ -1,0 +1,215 @@
+#!/usr/bin/env python3
+"""
+Milo Look (milo-look) — Autonomous Physical Optical Perception & Vision Sensor
+Part of MiloOS. Built for Wayland & Hyprland.
+Captures live hardware webcam frames (1080p MJPEG), inspects through Gemini Vision,
+and speaks natural language observations with Milo AI persona.
+"""
+
+import sys
+import os
+import argparse
+import subprocess
+import shutil
+import time
+from pathlib import Path
+
+# Ensure venv and local engines are reachable
+VENV_LIB = Path.home() / ".local" / "share" / "milo" / "venv" / "lib"
+if VENV_LIB.exists():
+    for d in VENV_LIB.glob("python*"):
+        sp = d / "site-packages"
+        if sp.exists() and str(sp) not in sys.path:
+            sys.path.insert(0, str(sp))
+
+EYES_DIR = Path.home() / ".local" / "share" / "milo" / "eyes"
+if str(EYES_DIR) not in sys.path:
+    sys.path.insert(0, str(EYES_DIR))
+
+try:
+    import milo_eyes_engine as engine
+except ImportError:
+    print("❌ Error: Could not import milo_eyes_engine from ~/.local/share/milo/eyes", file=sys.stderr)
+    sys.exit(1)
+
+def play_shutter():
+    sound_path = "/usr/share/sounds/freedesktop/stereo/camera-shutter.oga"
+    if os.path.exists(sound_path):
+        try:
+            subprocess.Popen(["pw-play", sound_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+def send_hud_say(text, image_path=None):
+    clean = text.replace('"', '\\"').replace('\n', ' ')
+    try:
+        if image_path:
+            subprocess.Popen(
+                ["omarchy-shell", "milo", "showCamera", clean, str(image_path)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+        else:
+            subprocess.Popen(
+                ["omarchy-shell", "milo", "say", clean],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+    except Exception:
+        pass
+
+def send_notification(title, message, icon="camera-web"):
+    try:
+        subprocess.Popen(
+            ["notify-send", "-a", "Milo Vision", "-i", icon, title, message],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+    except Exception:
+        pass
+
+def speak_aloud(text, force=False):
+    speak_bin = Path.home() / ".local" / "bin" / "milo-speak"
+    if speak_bin.exists():
+        cmd = [str(speak_bin)]
+        if force:
+            cmd.append("--force")
+        cmd.append(text)
+        try:
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Milo Optical Vision — Hardware Webcam Perception with Milo Intelligence"
+    )
+    parser.add_argument("query", nargs="*", default=[], help="Specific visual query or question")
+    parser.add_argument("--posture", "-p", action="store_true", help="Ergonomics, posture, and alertness analysis")
+    parser.add_argument("--desk", "-d", action="store_true", help="Inspect desk and physical workspace setup")
+    parser.add_argument("--read", "-r", action="store_true", help="Read/transcribe text on book, paper, or screen")
+    parser.add_argument("--open", "-o", action="store_true", help="Open captured frame in image viewer")
+    parser.add_argument("--save", "-s", type=str, default="", help="Save captured frame to file")
+    parser.add_argument("--silent", "-q", action="store_true", help="Do not speak response aloud")
+    parser.add_argument("--force-voice", action="store_true", help="Force voice speech even if muted in config")
+    parser.add_argument("--raw", action="store_true", help="Print only the raw AI response")
+    parser.add_argument("--device", type=str, default="/dev/video0", help="V4L2 camera device")
+    parser.add_argument("--res", type=str, default="1920x1080", help="Camera resolution")
+
+    args = parser.parse_args()
+
+    user_query = " ".join(args.query).strip()
+
+    # 1. Audio and visual cue: Camera shutter & HUD update
+    play_shutter()
+    if not args.raw:
+        send_hud_say("Scanning visual feed...")
+        send_notification("Milo Optical Sensor", "Capturing live frame from webcam...")
+
+    # 2. Capture hardware frame
+    cap_res = engine.capture_camera(
+        resolution=args.res,
+        device=args.device,
+        shutter_sound=False  # Already played above
+    )
+
+    if not cap_res.get("success"):
+        err_msg = cap_res.get("error", "Unknown camera capture error")
+        if not args.raw:
+            print(f"\033[31m❌ Camera Error:\033[0m {err_msg}", file=sys.stderr)
+            send_notification("Milo Vision Error", err_msg, icon="dialog-error")
+            send_hud_say("Camera sensor offline or busy, sir.")
+            if not args.silent:
+                speak_aloud("Camera sensor offline or occupied, sir.", force=args.force_voice)
+        else:
+            print(f"Error: {err_msg}", file=sys.stderr)
+        sys.exit(1)
+
+    frame_path = cap_res["path"]
+    frame_size_kb = round(cap_res.get("bytes", 0) / 1024, 1)
+
+    # 3. Handle save or open if requested
+    if args.save:
+        save_path = Path(args.save).expanduser().resolve()
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(frame_path, save_path)
+        if not args.raw:
+            print(f"\033[32m✔ Frame saved to:\033[0m {save_path}")
+
+    if args.open:
+        for viewer in ["swayimg", "imv", "xdg-open"]:
+            if shutil.which(viewer):
+                subprocess.Popen([viewer, frame_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                break
+
+    # 4. Construct Prompt based on intent
+    milo_persona = (
+        "You are Milo, a sharp, tactical AI companion embedded in MiloOS.\n"
+        "You are observing the user live through the laptop's hardware optical webcam.\n"
+        "Strict rules:\n"
+        "- Deliver a natural, punchy spoken response in 1 to 2 sentences maximum.\n"
+        "- Speak directly to the user in second person ('You are...', 'I see...', 'Looking sharp...').\n"
+        "- Adopt a confident, observant, slightly witty AI personality.\n"
+        "- Do NOT mention 'in this image', 'the photograph', 'the lighting', or visual artifacts.\n"
+    )
+
+    if args.posture:
+        prompt = (
+            f"{milo_persona}\n"
+            "TASK: Evaluate the user's physical posture, ergonomics, and alertness.\n"
+            "If they are slouching, hunched over, or looking fatigued, call them out with witty flair "
+            "and tell them to straighten their spine or hydrate. If posture is good, acknowledge it with dry respect."
+        )
+    elif args.desk:
+        prompt = (
+            f"{milo_persona}\n"
+            "TASK: Inspect the user's desk, workspace, and physical surrounding setup visible in the frame.\n"
+            "Note the state of gear, coffee/water bottles, notes, clutter, or lighting in a sharp observational one-liner."
+        )
+    elif args.read:
+        prompt = (
+            f"{milo_persona}\n"
+            "TASK: Read and transcribe the text on whatever paper, book, phone screen, or label the user is holding up.\n"
+            "State the title, headline, or main content clearly in 1 or 2 concise sentences."
+        )
+    elif user_query:
+        prompt = (
+            f"{milo_persona}\n"
+            f"The user asks: \"{user_query}\"\n"
+            "Answer the question directly, accurately, and concisely based on what you visually detect."
+        )
+    else:
+        # General observation
+        prompt = (
+            f"{milo_persona}\n"
+            "TASK: Describe what you observe about the user right now (what they are doing, wearing, holding, drinking, eating, or their current activity).\n"
+            "Keep it sharp, witty, and strictly 1 to 2 sentences."
+        )
+
+    # 5. Call Vision Model
+    response = engine.call_gemini_vision(frame_path, prompt)
+
+    # Clean response
+    clean_text = response.strip().replace("\n", " ")
+
+    # 6. Deliver Output
+    if args.raw:
+        print(clean_text)
+    else:
+        print("\033[36m┌─ 👁️  MILO OPTICAL VISION SENSOR ──────────────────────────────────────┐\033[0m")
+        print(f"\033[36m│\033[0m Device: \033[1m{cap_res['device']}\033[0m | Res: \033[1m{cap_res['resolution']}\033[0m | Frame: \033[1m{frame_size_kb} KB\033[0m")
+        if user_query:
+            print(f"\033[36m│\033[0m Query:  \033[33m\"{user_query}\"\033[0m")
+        print("\033[36m└────────────────────────────────────────────────────────────────────────┘\033[0m")
+        print(f"\n\033[32;1mMilo:\033[0m \"{clean_text}\"\n")
+
+    # HUD & Notification
+    send_hud_say(clean_text, image_path=frame_path)
+    send_notification("Milo Optical Vision", clean_text, icon="camera-web")
+
+    # Voice TTS
+    if not args.silent:
+        speak_aloud(clean_text, force=args.force_voice)
+
+if __name__ == "__main__":
+    main()

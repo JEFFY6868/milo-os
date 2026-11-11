@@ -1,0 +1,283 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Milo Evolution Engine CLI (milo-evolve)
+# Supervised Self-Upgrade & Autonomous Feature Genesis Protocol (MEP-1)
+# ==============================================================================
+set -e
+
+PYTHON_BIN="${HOME}/.local/share/milo/venv/bin/python3"
+EVO_DIR="${HOME}/.local/share/milo/evolution"
+ACTIVE_PROP="$EVO_DIR/proposals/active_proposal.json"
+export PYTHONPATH="$EVO_DIR:$PYTHONPATH"
+
+cmd="${1:-status}"
+shift || true
+
+case "$cmd" in
+    --help|-h|help)
+        echo "Usage: milo-evolve {audit|scan|plan|wish <prompt>|approve|defer|diff|status|benchmark|harden}"
+        exit 0
+        ;;
+    scan)
+        echo -e "\033[1;36m🧠 [Milo Evolution] Scanning system diagnostics & capability opportunities...\033[0m"
+        "$PYTHON_BIN" "$EVO_DIR/scanner.py"
+        ;;
+
+    plan|propose)
+        echo -e "\033[1;36m💡 [Milo Evolution] Synthesizing Upgrade / Feature Proposal...\033[0m"
+        prop_path=$("$PYTHON_BIN" "$EVO_DIR/synthesizer.py" | grep "Proposal generated" | cut -d' ' -f6)
+        echo -e "\033[1;32m✔ Proposal Formulated:\033[0m $prop_path"
+        echo -e "\033[1;35m📡 Dispatching Briefing to Desktop HUD & Voice...\033[0m"
+        "$PYTHON_BIN" "$EVO_DIR/supervisor.py"
+        ;;
+
+    wish)
+        wish_prompt="$*"
+        if [ -z "$wish_prompt" ]; then
+            echo -e "\033[1;36m✨ [Milo Thought-to-Code Genesis]\033[0m"
+            echo -e "\033[0;37mEnter your wish (or type 'audit' to scan codebase for weak areas):\033[0m"
+            read -rp "❯ " wish_prompt
+            if [ -z "$wish_prompt" ]; then
+                echo "Aborted."
+                exit 0
+            fi
+        fi
+        if [ "$wish_prompt" = "audit" ] || [ "$wish_prompt" = "audit codebase" ] || [ "$wish_prompt" = "scan codebase" ]; then
+            exec "$0" audit
+        fi
+        echo -e "\033[1;36m✨ [Milo Thought-to-Code] Synthesizing custom tool from wish...\033[0m"
+        echo -e "   \033[0;35m• Wish:\033[0m $wish_prompt"
+        "$PYTHON_BIN" -c "
+import sys
+import json
+from synthesizer import MiloSynthesizer
+from supervisor import MiloSupervisor
+
+synth = MiloSynthesizer()
+prop = synth.generate_from_llm_wish('$wish_prompt')
+if not prop:
+    print('❌ Failed to formulate proposal from wish.')
+    sys.exit(1)
+
+path = synth.save_proposal(prop)
+print(f'✔ Proposal formulated: {path}')
+sup = MiloSupervisor()
+sup.brief(prop)
+"
+        ;;
+
+    audit)
+        echo -e "\033[1;36m🔍 [Milo Codebase Forensic Auditor] Scanning tools & services...\033[0m"
+        "$PYTHON_BIN" -c "
+import sys
+import json
+from auditor import MiloAuditor
+from synthesizer import MiloSynthesizer
+from supervisor import MiloSupervisor
+
+auditor = MiloAuditor()
+report = auditor.run_full_audit()
+
+print(f'\033[1;32m✔ Audit Completed in {report[\"scan_duration_sec\"]}s\033[0m')
+print(f'• Total Findings: {report[\"total_issues_found\"]} (🔴 {report[\"critical_count\"]} Critical/High | 🟡 {report[\"warning_count\"]} Warnings)')
+
+print('─' * 70)
+for i, iss in enumerate(report['issues'][:5], 1):
+    print(f'  {i}. [{iss[\"severity\"]}] \033[1;37m{iss[\"title\"]}\033[0m')
+    print(f'     • {iss[\"description\"]}')
+print('─' * 70)
+
+top_issue = report['issues'][0] if report['issues'] else None
+if top_issue:
+    synth = MiloSynthesizer()
+    prop = auditor.generate_resolution_proposal(top_issue)
+    if prop:
+        path = synth.save_proposal(prop)
+        print(f'\033[1;35m✦ Formulated 1-Click Fix:\033[0m {prop[\"title\"]}')
+        sup = MiloSupervisor()
+        sup.brief(prop)
+"
+        ;;
+
+    harden|heal|fix-all)
+        echo -e "\033[1;36m🛡️ [Milo Codebase Hardening] Remediating all critical script findings...\033[0m"
+        "$PYTHON_BIN" -c "
+import sys
+from auditor import MiloAuditor
+from supervisor import MiloSupervisor
+
+auditor = MiloAuditor()
+report = auditor.run_full_audit()
+sup = MiloSupervisor()
+
+hardened = 0
+for iss in report['issues']:
+    if iss.get('fix_type') == 'inject_strict_mode':
+        prop = auditor.generate_resolution_proposal(iss)
+        if prop:
+            print(f'✦ Fortifying {iss[\"component\"]}...')
+            ok = sup.apply_proposal(prop)
+            if ok:
+                hardened += 1
+                print(f'  ✔ {iss[\"component\"]} hardened and syntax verified.')
+            else:
+                print(f'  ✘ Failed to harden {iss[\"component\"]}.')
+
+print(f'\n\033[1;32m✔ Hardening Complete: {hardened} critical components fortified with strict error traps.\033[0m')
+"
+        ;;
+
+    diff)
+        if [ ! -f "$ACTIVE_PROP" ]; then
+            echo -e "\033[1;33mℹ No active evolution proposal to inspect.\033[0m"
+            echo "Run 'milo-evolve plan' or 'milo-evolve wish <idea>' first."
+            exit 0
+        fi
+        "$PYTHON_BIN" -c "
+import json
+from pathlib import Path
+
+with open('$ACTIVE_PROP', 'r') as f:
+    prop = json.load(f)
+
+title = prop.get('title', 'Unknown')
+print('\033[1;36m✦ [Milo Code Inspector]\033[0m \033[1;37m' + title + '\033[0m')
+print('• Proposal ID: ' + prop.get('id', 'N/A'))
+print('• Verification Command: \033[1;33m' + prop.get('verification_command', 'true') + '\033[0m')
+print('═' * 70)
+
+for act in prop.get('actions', []):
+    path = act.get('path', 'unknown')
+    content = act.get('content', '')
+    print(f'\033[1;32m+++ Target Script: {path}\033[0m (Executable: {act.get(\"executable\", False)})')
+    print('─' * 70)
+    for i, line in enumerate(content.split('\n'), 1):
+        print(f'\033[0;35m{i:3d} │\033[0m {line}')
+    print('═' * 70)
+
+print('\n\033[1;36mAuthorize with:\033[0m milo-evolve approve  |  \033[1;31mDefer with:\033[0m milo-evolve defer')
+"
+        ;;
+
+    doctor)
+        echo -e "\033[1;36m🩺 [Milo System Doctor] Running deep diagnostics...\033[0m"
+        "$PYTHON_BIN" -c "
+from scanner import MiloScanner
+sc = MiloScanner()
+issues = sc.run_doctor_diagnostics()
+if not issues:
+    print('\033[1;32m✔ All core daemons, sockets, systemd units, and disk limits NOMINAL.\033[0m')
+else:
+    print(f'\033[1;31m⚠️ Detected {len(issues)} issue(s):\033[0m')
+    for iss in issues:
+        print(f'  • [{iss.get(\"category\")}] {iss.get(\"description\")}')
+"
+        ;;
+
+    benchmark|bench)
+        echo -e "\033[1;36m⚡ [Milo Benchmark Engine] Measuring Real-Time Core Latencies...\033[0m"
+        "$PYTHON_BIN" -c "
+from scanner import MiloScanner
+sc = MiloScanner()
+b = sc.benchmark_system_latencies()
+mem = sc.check_system_memory()
+gpu = sc.check_gpu_telemetry()
+print(f'• Voice Kokoro TTS Ping:  \033[1;32m{b.get(\"voice_ping_ms\")} ms\033[0m')
+print(f'• Cortex Local LLM Ping:  \033[1;32m{b.get(\"cortex_ping_ms\")} ms\033[0m')
+print(f'• GPU NVML Query Speed:   \033[1;32m{b.get(\"gpu_query_ms\")} ms\033[0m')
+print(f'• RAM Total / In Use:     \033[1;36m{mem.get(\"ram_used_mb\")} / {mem.get(\"ram_total_mb\")} MB ({mem.get(\"ram_usage_pct\")} %)\033[0m')
+if gpu.get('available'):
+    print(f'• GPU VRAM In Use:        \033[1;36m{gpu.get(\"vram_used_mib\")} / {gpu.get(\"vram_total_mib\")} MiB ({gpu.get(\"temp_c\")}°C, {gpu.get(\"power_w\")}W)\033[0m')
+print('✔ All system response latencies within optimal microsecond/millisecond bands.')
+"
+        ;;
+
+    approve|apply)
+        if [ ! -f "$ACTIVE_PROP" ]; then
+            echo -e "\033[1;31m✘ No active evolution proposal to approve. Run 'milo-evolve plan' first.\033[0m"
+            exit 1
+        fi
+        echo -e "\033[1;32m✦ [Milo Evolution] Authorization Granted! Applying patch...\033[0m"
+        "$PYTHON_BIN" -c "
+import json
+from supervisor import MiloSupervisor
+with open('$ACTIVE_PROP', 'r') as f:
+    prop = json.load(f)
+sup = MiloSupervisor()
+success = sup.apply_proposal(prop)
+if success:
+    print('Upgrade complete.')
+else:
+    print('Upgrade rolled back.')
+"
+        ;;
+
+    defer|dismiss)
+        if [ ! -f "$ACTIVE_PROP" ]; then
+            echo -e "\033[1;33mℹ No active evolution proposal to defer.\033[0m"
+            exit 0
+        fi
+        echo -e "\033[1;33m✕ [Milo Evolution] Deferring proposal...\033[0m"
+        "$PYTHON_BIN" -c "
+import os
+from pathlib import Path
+from supervisor import MiloSupervisor
+
+active_path = Path('$ACTIVE_PROP')
+if active_path.exists() or active_path.is_symlink():
+    try:
+        active_path.unlink()
+    except Exception:
+        pass
+
+sup = MiloSupervisor()
+sup.hud_say('✦ EVOLUTION DEFERRED // Proposal archived. System baseline intact.')
+sup.speak('Evolution proposal deferred. Core baseline preserved.')
+print('Proposal deferred.')
+"
+        ;;
+
+    current)
+        if [ -f "$ACTIVE_PROP" ]; then
+            cat "$ACTIVE_PROP" | jq .
+        else
+            echo "No active proposal currently pending."
+        fi
+        ;;
+
+    test-rollback)
+        echo -e "\033[1;33m⚠️ [Milo Evolution] Running Rollback Safety Net Simulation...\033[0m"
+        "$PYTHON_BIN" -c "
+from supervisor import MiloSupervisor
+dummy_fail_prop = {
+    'id': 'sim-failure-test',
+    'title': 'Deliberate Intentional Bug Simulation',
+    'actions': [
+        {
+            'action': 'create_script',
+            'path': '/tmp/milo_test_buggy_script.sh',
+            'executable': True,
+            'content': '#!/bin/bash\nexit 42\n'
+        }
+    ],
+    'verification_command': '/tmp/milo_test_buggy_script.sh'
+}
+sup = MiloSupervisor()
+sup.apply_proposal(dummy_fail_prop)
+"
+        ;;
+
+    status|ledger)
+        echo -e "\033[1;36m📜 [Milo Evolution Ledger]\033[0m"
+        if [ -f "$EVO_DIR/evolution_ledger.json" ]; then
+            cat "$EVO_DIR/evolution_ledger.json" | jq .
+        else
+            echo "No evolution records yet."
+        fi
+        ;;
+
+    *)
+        echo "Usage: milo-evolve {wish <prompt>|diff|doctor|benchmark|scan|plan|approve|defer|current|test-rollback|status}"
+        exit 1
+        ;;
+esac

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Milo Cortex Model Surgeon — Weight-Space Model Surgery CLI
+# Part of MiloOS. Built for Arch Linux & Hyprland.
+# ==============================================================================
+set -e
+
+PYTHON_BIN="${HOME}/.local/share/milo/venv/bin/python3"
+if [ ! -x "$PYTHON_BIN" ]; then
+    PYTHON_BIN="python3"
+fi
+
+SURGEON_SCRIPT="${HOME}/.local/share/milo/cortex/surgeon.py"
+
+exec "$PYTHON_BIN" "$SURGEON_SCRIPT" "$@"

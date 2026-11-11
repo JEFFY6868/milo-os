@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# ==============================================================================
+# milo-hermes: Hermes Agent Operations Runner ($0 Cost)
+# Connects to NVIDIA NIM (Mistral Large 4 1T) or Groq
+# Part of MiloOS. Built for Arch Linux & Hyprland.
+# ==============================================================================
+
+if [ -f ${HOME}/.config/milo/keys.env ]; then
+    source ${HOME}/.config/milo/keys.env
+fi
+
+# Self-healing: Clean up dead gateway lock/socket if leftover from a crash
+if [ -f ${HOME}/.hermes/gateway.lock ]; then
+    LOCK_PID=$(grep -o '"pid": [0-9]*' ${HOME}/.hermes/gateway.lock 2>/dev/null | awk '{print $2}')
+    if [ -n "$LOCK_PID" ] && ! kill -0 "$LOCK_PID" 2>/dev/null; then
+        rm -f ${HOME}/.hermes/gateway.sock ${HOME}/.hermes/gateway.lock
+    fi
+fi
+if [ -e ${HOME}/.hermes/gateway.sock ] && ! fuser ${HOME}/.hermes/gateway.sock >/dev/null 2>&1; then
+    rm -f ${HOME}/.hermes/gateway.sock ${HOME}/.hermes/gateway.lock
+fi
+
+# Auto-start systemd service if available
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl --user start hermes-gateway 2>/dev/null || true
+fi
+
+DEFAULT_MODEL_ARGS=()
+
+if [ -n "$NVIDIA_API_KEY" ]; then
+    export NVIDIA_API_KEY="$NVIDIA_API_KEY"
+    DEFAULT_MODEL_ARGS=(--provider nvidia -m "mistralai/mistral-large-4-1t-a52b")
+elif [ -n "$GROQ_API_KEY" ]; then
+    export GROQ_API_KEY="$GROQ_API_KEY"
+    DEFAULT_MODEL_ARGS=(--provider custom --base-url "https://api.groq.com/openai/v1" --api-key "$GROQ_API_KEY" -m "llama-3.3-70b-versatile")
+else
+    DEFAULT_MODEL_ARGS=(--provider custom --base-url "http://127.0.0.1:20128/v1" --api-key "${HERMES_API_KEY:-local-proxy-token}" -m "auto/best-fast")
+fi
+
+# Check if model flag is already explicitly passed
+HAS_MODEL=0
+for arg in "$@"; do
+    if [ "$arg" = "-m" ] || [ "$arg" = "--model" ]; then
+        HAS_MODEL=1
+        break
+    fi
+done
+
+if [ $# -eq 0 ]; then
+    exec ${HOME}/.local/bin/hermes --cli "${DEFAULT_MODEL_ARGS[@]}"
+elif [ $HAS_MODEL -eq 0 ]; then
+    exec ${HOME}/.local/bin/hermes --cli "${DEFAULT_MODEL_ARGS[@]}" "$@"
+else
+    exec ${HOME}/.local/bin/hermes --cli "$@"
+fi

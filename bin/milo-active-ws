@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Milo Active Workspace Inspector
+# Displays the currently active workspace and its windows in Hyprland.
+
+set -euo pipefail
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Milo Active Workspace Inspector
+Retrieves the active workspace ID/name and lists all windows within it using hyprctl.
+
+Options:
+  -h, --help    Show this help message and exit
+  -j, --json    Output raw JSON (for scripting)
+  -n, --name    Show only the workspace name
+  -w, --windows Show only the window titles
+EOF
+    exit 0
+}
+
+# Parse arguments
+JSON_OUTPUT=false
+NAME_ONLY=false
+WINDOWS_ONLY=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help)
+            usage
+            ;;
+        -j|--json)
+            JSON_OUTPUT=true
+            shift
+            ;;
+        -n|--name)
+            NAME_ONLY=true
+            shift
+            ;;
+        -w|--windows)
+            WINDOWS_ONLY=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            usage
+            ;;
+    esac
+done
+
+# Check if hyprctl exists
+if ! command -v hyprctl &> /dev/null; then
+    echo "Error: hyprctl not found. Are you running Hyprland?" >&2
+    exit 1
+fi
+
+# Get active workspace info
+ACTIVE_WS_JSON=$(hyprctl -j activeworkspace)
+if [[ $? -ne 0 ]]; then
+    echo "Error: Failed to retrieve active workspace." >&2
+    exit 1
+fi
+
+WS_ID=$(echo "$ACTIVE_WS_JSON" | jq -r '.id')
+WS_NAME=$(echo "$ACTIVE_WS_JSON" | jq -r '.name')
+
+# Get all windows
+WINDOWS_JSON=$(hyprctl -j windows)
+if [[ $? -ne 0 ]]; then
+    echo "Error: Failed to retrieve windows." >&2
+    exit 1
+fi
+
+# Filter windows belonging to the active workspace
+ACTIVE_WINDOWS=$(echo "$WINDOWS_JSON" | jq -r --arg ws_id "$WS_ID" '.[] | select(.workspace.id == ($ws_id | tonumber)) | .class + " | " + .title')
+
+# Output logic
+if [[ "$JSON_OUTPUT" == true ]]; then
+    echo "$ACTIVE_WS_JSON"
+    echo "$WINDOWS_JSON" | jq -r --arg ws_id "$WS_ID" '[ .[] | select(.workspace.id == ($ws_id | tonumber)) ]'
+elif [[ "$NAME_ONLY" == true ]]; then
+    echo "$WS_NAME"
+elif [[ "$WINDOWS_ONLY" == true ]]; then
+    echo "$ACTIVE_WINDOWS"
+else
+    echo "Active Workspace: [${WS_ID}] ${WS_NAME}"
+    echo "---"
+    if [[ -n "$ACTIVE_WINDOWS" ]]; then
+        echo "$ACTIVE_WINDOWS"
+    else
+        echo "(No windows found in active workspace)"
+    fi
+fi
+
+exit 0

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Milo Multi-Repo Sentinel
+echo -e '\033[1;36m[Milo Git Sentinel] Scanning project workspaces...\033[0m'
+for repo in ~/workspace/* ~/Milo* ~/.local/share/milo; do
+  if [ -d "$repo/.git" ]; then
+    dirty=$(git -C "$repo" status -s | wc -l)
+    if [ "$dirty" -gt 0 ]; then
+      echo -e "  • \033[1;33m$repo\033[0m: $dirty modified files"
+    fi
+  fi
+done

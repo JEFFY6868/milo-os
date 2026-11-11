@@ -1,0 +1,335 @@
+#!/usr/bin/env python3
+"""
+milo-music: Milo Cyber Soundtrack Engine for MiloOS
+Part of MiloOS. Built for Arch Linux, Hyprland & Wayland Desktop HUD.
+Plays local music from str(Path.home())/Music using mpv with MPRIS & IPC integration.
+"""
+
+import os
+import sys
+import re
+import json
+import socket
+import subprocess
+import time
+import random
+import tty
+import termios
+import select
+from pathlib import Path
+
+MUSIC_DIR = Path.home() / "Music"
+PLAYLIST_FILE = Path.home() / ".config/milo/soundtrack.m3u")
+IPC_SOCKET = Path("/tmp/milo-mpv.sock")
+PID_FILE = Path("/tmp/milo-mpv.pid")
+MPRIS_SCRIPT = Path.home() / "/.config/mpv/scripts/mpris.so")
+
+def send_ipc(command, retries=2):
+    if not IPC_SOCKET.exists():
+        return None
+    for _ in range(retries):
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.settimeout(0.6)
+            s.connect(str(IPC_SOCKET))
+            msg = json.dumps({"command": command}) + "\n"
+            s.sendall(msg.encode("utf-8"))
+            data = b""
+            while True:
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+                if b"\n" in chunk:
+                    break
+            s.close()
+            if data:
+                return json.loads(data.decode("utf-8", errors="ignore"))
+        except Exception:
+            time.sleep(0.08)
+    return None
+
+def is_running():
+    res = send_ipc(["get_property", "pid"])
+    return bool(res and res.get("data"))
+
+def build_playlist():
+    PLAYLIST_FILE.parent.mkdir(parents=True, exist_ok=True)
+    exts = ("*.mp3", "*.flac", "*.wav", "*.m4a", "*.ogg")
+    tracks = []
+    for ext in exts:
+        tracks.extend(MUSIC_DIR.rglob(ext))
+    if not tracks:
+        return []
+    tracks = list(set(tracks))
+    random.shuffle(tracks)
+    with open(PLAYLIST_FILE, "w", encoding="utf-8") as f:
+        for t in tracks:
+            f.write(str(t) + "\n")
+    return tracks
+
+def notify(title, msg):
+    subprocess.run(["notify-send", "-a", "Repulsor Soundtrack", "-i", "audio-speakers", title, msg], capture_output=True)
+
+def start_player(specific_track=None):
+    if is_running():
+        if specific_track:
+            send_ipc(["loadfile", str(specific_track), "replace"])
+            send_ipc(["set_property", "pause", False])
+        else:
+            send_ipc(["set_property", "pause", False])
+        return
+
+    # Clean stale socket if dead process
+    if IPC_SOCKET.exists():
+        try:
+            IPC_SOCKET.unlink()
+        except OSError:
+            pass
+
+    tracks = build_playlist()
+    if not tracks:
+        print("No audio tracks found in", MUSIC_DIR)
+        return
+
+    # Attempt to start through systemd user service if available
+    try:
+        res = subprocess.run(["systemctl", "--user", "start", "milo-music"], capture_output=True, timeout=2)
+        if res.returncode == 0:
+            for _ in range(20):
+                if is_running():
+                    break
+                time.sleep(0.1)
+            if is_running():
+                if specific_track:
+                    send_ipc(["loadfile", str(specific_track), "replace"])
+                send_ipc(["set_property", "pause", False])
+                notify("Milo Soundtrack Initialized", f"Loaded {len(tracks)} local tracks from ~/Music")
+                return
+    except Exception:
+        pass
+
+    cmd = [
+        "mpv",
+        "--no-video",
+        f"--input-ipc-server={IPC_SOCKET}",
+        f"--scripts={MPRIS_SCRIPT}",
+        "--idle=yes",
+        "--loop-playlist=inf",
+        f"--playlist={PLAYLIST_FILE}"
+    ]
+
+    if specific_track:
+        cmd.extend(["--start=0", str(specific_track)])
+    else:
+        cmd.append("--shuffle")
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        preexec_fn=os.setpgrp
+    )
+
+    with open(PID_FILE, "w") as f:
+        f.write(str(proc.pid))
+
+    for _ in range(20):
+        if IPC_SOCKET.exists() and is_running():
+            break
+        time.sleep(0.1)
+
+    if specific_track:
+        send_ipc(["set_property", "pause", False])
+
+    notify("Milo Soundtrack Initialized", f"Loaded {len(tracks)} local tracks from ~/Music")
+
+def play_pause():
+    if not is_running():
+        start_player()
+    else:
+        send_ipc(["cycle", "pause"])
+
+def next_track():
+    if not is_running():
+        start_player()
+    else:
+        send_ipc(["playlist-next"])
+
+def prev_track():
+    if not is_running():
+        start_player()
+    else:
+        send_ipc(["playlist-prev"])
+
+def stop_player():
+    send_ipc(["quit"])
+    time.sleep(0.2)
+    if IPC_SOCKET.exists():
+        try:
+            IPC_SOCKET.unlink()
+        except OSError:
+            pass
+    if PID_FILE.exists():
+        try:
+            PID_FILE.unlink()
+        except OSError:
+            pass
+    notify("Milo Soundtrack", "Playback stopped")
+
+def clean_song_name(text):
+    if not text:
+        return ""
+    t = str(text)
+    t = re.sub(r"(?i)\s*[-_~]?\s*(mass\s*tamilan|isaimini|starmusiq|tamiltunes|sensongs|naasongs)[^\(\)\[\]]*", "", t)
+    t = re.sub(r"(?i)\.(mp3|flac|wav|m4a|ogg)$", "", t)
+    t = t.strip(" -_")
+    return t or "Unknown"
+
+def get_status():
+    if not is_running():
+        # Check if another MPRIS player is active (e.g. Spotify, browser)
+        try:
+            res = subprocess.run(["playerctl", "metadata", "--format", "{{title}}:::{{artist}}:::{{status}}"], capture_output=True, text=True, timeout=1)
+            if res.returncode == 0 and res.stdout.strip() and ":::" in res.stdout:
+                parts = res.stdout.strip().split(":::")
+                title = clean_song_name(parts[0] if len(parts) > 0 else "")
+                artist = clean_song_name(parts[1] if len(parts) > 1 else "")
+                state = parts[2] if len(parts) > 2 else "Paused"
+                return f"{title}:::{artist}:::{state}"
+        except Exception:
+            pass
+        return "Cyber Soundtrack:::Milo Audio · Ready (736 Tracks):::Paused"
+
+    pause_res = send_ipc(["get_property", "pause"])
+    is_paused = pause_res.get("data") if pause_res else False
+    status = "Paused" if is_paused else "Playing"
+
+    meta_res = send_ipc(["get_property", "metadata"])
+    meta = meta_res.get("data") if meta_res else {}
+
+    title = meta.get("title") or meta.get("TITLE")
+    artist = meta.get("artist") or meta.get("ARTIST")
+
+    if not title:
+        title_res = send_ipc(["get_property", "media-title"])
+        title = title_res.get("data") if title_res else "Local Soundtrack"
+
+    if not artist:
+        artist = "Milo Audio - Local Vault"
+
+    title = clean_song_name(str(title))
+    artist = clean_song_name(str(artist))
+    return f"{title}:::{artist}:::{status}"
+
+def pick_song():
+    exts = ("*.mp3", "*.flac", "*.wav", "*.m4a", "*.ogg")
+    tracks = []
+    for ext in exts:
+        tracks.extend(MUSIC_DIR.rglob(ext))
+    if not tracks:
+        print("No tracks found in", MUSIC_DIR)
+        return
+
+    items = {}
+    for t in tracks:
+        name = clean_song_name(t.stem)
+        if name in items:
+            name = f"{name} ({t.parent.name})"
+        items[name] = t
+    input_text = "\n".join(sorted(items.keys()))
+
+    res = subprocess.run(["fuzzel", "--dmenu", "-p", "Play Track: "], input=input_text, text=True, capture_output=True)
+    choice = res.stdout.strip()
+    if choice and choice in items:
+        start_player(items[choice])
+        notify("Now Playing", choice)
+
+def run_tui():
+    if not is_running():
+        start_player()
+
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)
+        while True:
+            st = get_status().split(":::")
+            title = st[0] if len(st) > 0 else "Unknown"
+            artist = st[1] if len(st) > 1 else "Unknown"
+            state = st[2] if len(st) > 2 else "Paused"
+
+            sys.stdout.write("\033[H\033[J")
+            sys.stdout.write("\033[1;31m" + "=" * 64 + "\033[0m\n")
+            sys.stdout.write("  \033[1;37mMILO PROTOCOL // CYBER SOUNDTRACK HUD\033[0m\n")
+            sys.stdout.write("  \033[1;31mMilo High-Fidelity Audio Matrix (736 Tracks)\033[0m\n")
+            sys.stdout.write("\033[1;31m" + "=" * 64 + "\033[0m\n\n")
+
+            state_color = "\033[1;32mPLAYING" if state == "Playing" else "\033[1;33mPAUSED"
+            sys.stdout.write(f"  \033[1;31mSTATUS  :\033[0m {state_color}\033[0m\n")
+            sys.stdout.write(f"  \033[1;31mTRACK   :[0m \033[1;37m{title}\033[0m\n")
+            sys.stdout.write(f"  \033[1;31mARTIST  :[0m \033[0;37m{artist}\033[0m\n")
+            sys.stdout.write(f"  \033[1;31mSOURCE  :[0m str(Path.home())/Music (Local FLAC/MP3)\n\n")
+
+            sys.stdout.write("\033[1;31m" + "-" * 64 + "\033[0m\n")
+            sys.stdout.write("  \033[1;37m[Space]\033[0m Play/Pause   \033[1;37m[n]\033[0m Next   \033[1;37m[p]\033[0m Previous   \033[1;37m[s]\033[0m Shuffle\n")
+            sys.stdout.write("  \033[1;37m[f]\033[0m Search (Fuzzel)   \033[1;37m[x]\033[0m Stop      \033[1;37m[q]\033[0m Minimize to Background\n")
+            sys.stdout.write("\033[1;31m" + "=" * 64 + "\033[0m\n")
+            sys.stdout.flush()
+
+            rlist, _, _ = select.select([sys.stdin], [], [], 1.0)
+            if rlist:
+                ch = sys.stdin.read(1)
+                if ch in ("q", "Q"):
+                    break
+                elif ch == " ":
+                    play_pause()
+                elif ch in ("n", "N"):
+                    next_track()
+                elif ch in ("p", "P"):
+                    prev_track()
+                elif ch in ("s", "S"):
+                    build_playlist()
+                    send_ipc(["playlist-shuffle"])
+                    notify("Soundtrack Shuffled", "736 tracks randomized")
+                elif ch in ("f", "F"):
+                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+                    pick_song()
+                    tty.setcbreak(fd)
+                elif ch in ("x", "X"):
+                    stop_player()
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+def main():
+    if len(sys.argv) < 2:
+        play_pause()
+        return
+
+    arg = sys.argv[1].lower()
+    if arg in ("play", "start"):
+        start_player()
+    elif arg in ("pause", "toggle", "play-pause"):
+        play_pause()
+    elif arg in ("next", "skip"):
+        next_track()
+    elif arg in ("prev", "previous"):
+        prev_track()
+    elif arg == "stop":
+        stop_player()
+    elif arg == "status":
+        print(get_status())
+    elif arg in ("pick", "select", "search"):
+        pick_song()
+    elif arg in ("tui", "gui", "hud"):
+        run_tui()
+    elif arg == "shuffle":
+        build_playlist()
+        send_ipc(["playlist-shuffle"])
+        print("Playlist shuffled")
+    else:
+        print(f"Unknown command: {arg}")
+        print("Usage: milo-music [play|pause|play-pause|next|prev|stop|status|pick|tui|shuffle]")
+
+if __name__ == "__main__":
+    main()

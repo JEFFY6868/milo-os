@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Milo Game Mode Supervisor
+# Evicts resident AI models from GPU VRAM and dedicates 100% GPU to gaming.
+# ==============================================================================
+set -e
+
+STATE_DIR="$HOME/.config/milo"
+STATE_FILE="$STATE_DIR/gamemode.state"
+JSON_FILE="/tmp/milo-gamemode.json"
+mkdir -p "$STATE_DIR"
+
+notify() {
+    local title="$1"
+    local msg="$2"
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send -a "Milo OS" -i "input-gaming" "$title" "$msg" 2>/dev/null || true
+    fi
+}
+
+get_free_vram() {
+    nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null || echo "Unknown"
+}
+
+get_used_vram() {
+    nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null || echo "Unknown"
+}
+
+sync_hud_state() {
+    local is_active="$1"
+    local free_vram
+    free_vram=$(get_free_vram)
+    local used_vram
+    used_vram=$(get_used_vram)
+    cat <<EOF > "$JSON_FILE.tmp"
+{
+  "active": $is_active,
+  "vram_used": "${used_vram} MiB",
+  "vram_free": "${free_vram} MiB",
+  "timestamp": $(date +%s)
+}
+EOF
+    mv "$JSON_FILE.tmp" "$JSON_FILE"
+}
+
+game_on() {
+    echo -e "\033[1;36m🎮 [Milo Game Mode] Activating Gaming Profile...\033[0m"
+
+    # 1. Stop Milo Resident AI Daemons
+    echo "  • Unloading Milo Voice Daemon (Kokoro-82M)..."
+    systemctl --user stop milo-voice.service 2>/dev/null || true
+
+    echo "  • Unloading Milo Cortex Daemon (Qwen2.5 LLM)..."
+    systemctl --user stop milo-cortex.service 2>/dev/null || true
+
+    # Clean any lingering python model processes on GPU if any
+    pkill -f "${HOME}/.local/share/milo/voice/daemon.py" 2>/dev/null || true
+    pkill -f "${HOME}/.local/share/milo/cortex/daemon.py" 2>/dev/null || true
+
+    sleep 1
+
+    # 2. Record state
+    date +%s > "$STATE_FILE"
+
+    # 3. Report GPU VRAM state
+    local free_vram
+    free_vram=$(get_free_vram)
+    local used_vram
+    used_vram=$(get_used_vram)
+    sync_hud_state true
+
+    echo -e "\033[1;32m✔ [Milo Game Mode] ACTIVE!\033[0m"
+    echo -e "  • VRAM Used: \033[1;33m${used_vram} MiB\033[0m / 3072 MiB"
+    echo -e "  • VRAM Free: \033[1;32m${free_vram} MiB\033[0m dedicated to games"
+    echo -e "  • AI Daemons: \033[1;30mSuspended (0% CPU, 0% GPU)\033[0m"
+
+    notify "🎮 Game Mode Active" "VRAM freed: ${free_vram} MiB available for gaming."
+    milo-sound shield 2>/dev/null || true
+}
+
+game_off() {
+    echo -e "\033[1;36m⚡ [Milo Game Mode] Deactivating Gaming Profile...\033[0m"
+
+    rm -f "$STATE_FILE"
+
+    echo "  • Restoring Milo Cortex Daemon (Qwen2.5)..."
+    systemctl --user start milo-cortex.service 2>/dev/null || true
+
+    echo "  • Restoring Milo Voice Daemon (Kokoro-82M)..."
+    systemctl --user start milo-voice.service 2>/dev/null || true
+
+    sleep 2
+
+    local used_vram
+    used_vram=$(get_used_vram)
+    sync_hud_state false
+
+    echo -e "\033[1;32m✔ [Milo Game Mode] Normal Profile Restored.\033[0m"
+    echo -e "  • Resident VRAM: ${used_vram} MiB / 3072 MiB"
+    echo -e "  • Milo Voice & Cortex: \033[1;32mWarm & Online\033[0m"
+
+    notify "⚡ Milo AI Restored" "Voice and Cortex daemons back online."
+    milo-sound sweep 2>/dev/null || true
+}
+
+status() {
+    local is_active=false
+    if [ -f "$STATE_FILE" ]; then
+        is_active=true
+    fi
+
+    local free_vram
+    free_vram=$(get_free_vram)
+    local used_vram
+    used_vram=$(get_used_vram)
+    sync_hud_state "$is_active"
+
+    if [ "$is_active" = true ]; then
+        echo -e "\033[1;32m● Milo Game Mode: ACTIVE\033[0m"
+        echo -e "  • Profile: \033[1;33mPure Gaming (AI Daemons Off)\033[0m"
+    else
+        echo -e "\033[1;34m● Milo Game Mode: INACTIVE (Normal AI Mode)\033[0m"
+        echo -e "  • Profile: \033[1;32mAI Resident Warm\033[0m"
+    fi
+    echo -e "  • GPU Memory: \033[1;33m${used_vram} MiB used\033[0m / \033[1;32m${free_vram} MiB free\033[0m"
+}
+
+ACTION="${1:-toggle}"
+
+case "$ACTION" in
+    --help|-h|help)
+        echo "Usage: milo-game {on|off|toggle|status|run <cmd>}"
+        exit 0
+        ;;
+    on|start|enable)
+        game_on
+        ;;
+    off|stop|disable)
+        game_off
+        ;;
+    toggle)
+        if [ -f "$STATE_FILE" ]; then
+            game_off
+        else
+            game_on
+        fi
+        ;;
+    status)
+        status
+        ;;
+    run)
+        shift
+        if [ $# -eq 0 ]; then
+            echo "Usage: milo game run <command> [args...]"
+            exit 1
+        fi
+        game_on
+        echo -e "\n\033[1;35m🚀 Launching: $@\033[0m\n"
+        "$@" || true
+        echo -e "\n\033[1;35mGame session finished.\033[0m"
+        game_off
+        ;;
+    *)
+        echo "Usage: milo game {on|off|toggle|status|run <cmd>}"
+        exit 1
+        ;;
+esac

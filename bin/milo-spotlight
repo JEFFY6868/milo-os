@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""
+Milo Spotlight Native — Linux Native Wayland HUD / Command Center
+Sub-10ms appearance via resident UNIX Domain Socket IPC daemon (PyQt6).
+"""
+
+import os
+import sys
+import socket
+import subprocess
+from pathlib import Path
+
+SOCKET_PATH = Path.home() / ".local/state/milo/spotlight.sock"
+
+def try_toggle() -> bool:
+    """Attempts instant IPC toggle via UNIX domain socket."""
+    if not SOCKET_PATH.exists():
+        return False
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(0.3)
+        s.connect(str(SOCKET_PATH))
+        s.sendall(b"toggle\n")
+        s.close()
+        return True
+    except Exception:
+        try:
+            SOCKET_PATH.unlink()
+        except Exception:
+            pass
+        return False
+
+def main():
+    if "--web" in sys.argv:
+        # Fallback to Chromium web HUD if explicitly requested
+        html_path = "file://str(Path.home())/Projects/milo-hud-preview/index.html"
+        subprocess.Popen([
+            "chromium",
+            f"--app={html_path}",
+            "--class=milo-hud",
+            "--ozone-platform=wayland",
+            "--start-fullscreen"
+        ])
+        sys.exit(0)
+
+    is_daemon = "--daemon" in sys.argv
+
+    if SOCKET_PATH.exists():
+        if is_daemon:
+            try:
+                s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                s.settimeout(0.3)
+                s.connect(str(SOCKET_PATH))
+                s.close()
+                sys.exit(0)
+            except Exception:
+                try:
+                    SOCKET_PATH.unlink()
+                except Exception:
+                    pass
+        else:
+            if try_toggle():
+                sys.exit(0)
+
+    # Spawn native Wayland daemon
+    env = os.environ.copy()
+    env["QT_QPA_PLATFORM"] = "wayland"
+    env["PYTHONPATH"] = "/usr/local/share/milo/kino/studio"
+
+    cmd = [
+        "/usr/bin/python3",
+        "-u",
+        "/usr/local/share/milo/kino/studio/milo_spotlight_gui.py"
+    ]
+    if is_daemon:
+        cmd.append("--daemon")
+
+    log_file = Path.home() / ".local/state/milo/spotlight.log"
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_file, "a") as log_f:
+        subprocess.Popen(cmd, env=env, start_new_session=True, stdout=log_f, stderr=log_f)
+
+if __name__ == "__main__":
+    main()

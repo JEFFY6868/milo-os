@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Milo Master Help & System Roster
+# Part of MiloOS. Built for Arch Linux & Hyprland.
+# ==============================================================================
+set -euo pipefail
+
+cat << 'EOF'
+================================================================================
+ ⚡ MILO OS // TACTICAL COMMAND & WORKSTATION MATRIX
+================================================================================
+
+  Core AI & Cognitive Commands:
+    milo ask <query>           - Instant natural language query to Neural Cortex
+    milo doctor                - 1-second system health diagnostic & self-healer
+    milo audit                 - Full codebase forensic auditor (0.06s scan)
+    milo talk / quiet          - Enable or mute Kokoro-82M neural spoken voice
+    milo game {on|off|status}  - Dedicated gaming profile (evicts AI from VRAM)
+
+  Vision & Screen Perception:
+    milo ocr                   - Screen text to clipboard (SUPER + SHIFT + O)
+    milo ocr --ask             - Screen OCR & forward directly to AI (SUPER + ALT + O)
+    milo look                  - Optical hardware camera inspect (SUPER + I)
+    milo look --posture        - Ergonomic posture alignment check
+
+  Executive Multi-Agent Workstation:
+    milo dispatch <goal>       - CEO multi-agent task coordinator (SUPER + ALT + D)
+    milo code <goal>           - Claude Code terminal workspace (SUPER + ALT + C)
+    milo test <target>         - Aider automated QA debugging agent (SUPER + ALT + T)
+    milo hermes <mission>      - Hermes operations workstation (SUPER + ALT + H)
+
+  Desktop Media & Utilities:
+    milo sound {test|chime}    - Play PipeWire cybernetic sound cues
+    milo task {list|add|done}  - Manage desktop HUD scratchpad matrix
+    milo music                 - Stark repulsor cyber-soundtrack FLAC player
+    milotop                    - Real-time system resource monitor (SUPER + ESC)
+
+  Desktop HUD Shortcuts:
+    SUPER + V                  - High-speed voice dictation (Phonon-2)
+    ESC                        - Instant dismiss HUD cards and overlay
+    Click Background           - Instant dismiss HUD cards
+
+--------------------------------------------------------------------------------
+EOF

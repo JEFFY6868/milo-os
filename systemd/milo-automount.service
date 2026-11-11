@@ -1,0 +1,13 @@
+[Unit]
+Description=Milo Automount Daemon for Android MTP & External Storage
+After=gvfs-daemon.service
+Wants=gvfs-daemon.service
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/milo-automount
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

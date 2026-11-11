@@ -1,0 +1,262 @@
+#!/usr/bin/env python3
+"""
+Milo Phone Companion Hub
+Part of MiloOS. Built for Arch Linux & Hyprland.
+Manages pairing, live telemetry, wireless scrcpy mirroring, and file drops
+for Jeffy's Vivo Android Phone (v2428-1).
+"""
+
+import sys
+import os
+import subprocess
+import socket
+import json
+import shutil
+import time
+from pathlib import Path
+
+CYAN = "\033[36m"
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+MAGENTA = "\033[35m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
+RED = "\033[31m"
+RESET = "\033[0m"
+
+GLOBAL_URL = "https://milo-1-1.tail7dfc60.ts.net/live"
+APK_URL = "https://milo-1-1.tail7dfc60.ts.net/download"
+
+def get_ips():
+    ips = {"tailscale": "100.64.64.21", "wifi": None, "active": []}
+    try:
+        proc = subprocess.run(["ip", "-4", "-brief", "address", "show", "scope", "global"], capture_output=True, text=True, timeout=2)
+        for line in proc.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 3:
+                iface, state, addr = parts[0], parts[1], parts[2].split("/")[0]
+                if iface.startswith("tailscale"):
+                    ips["tailscale"] = addr
+                elif iface != "lo":
+                    if not ips["wifi"]:
+                        ips["wifi"] = addr
+                    ips["active"].append(f"{iface}: {addr}")
+    except Exception:
+        pass
+    if not ips["wifi"]:
+        ips["wifi"] = "10.250.235.95"
+    return ips
+
+def check_adb_devices():
+    devices = []
+    try:
+        res = subprocess.run(["adb", "devices", "-l"], capture_output=True, text=True, timeout=2)
+        lines = [l.strip() for l in res.stdout.splitlines() if l.strip() and not l.startswith("List of")]
+        for l in lines:
+            parts = l.split()
+            if len(parts) >= 2 and parts[1] == "device":
+                serial = parts[0]
+                model = "Vivo V2428"
+                for p in parts[2:]:
+                    if p.startswith("model:"):
+                        model = p.split(":")[1].replace("_", " ")
+                batt = None
+                charging = False
+                try:
+                    b_res = subprocess.run(["adb", "-s", serial, "shell", "dumpsys", "battery"], capture_output=True, text=True, timeout=0.5)
+                    for bl in b_res.stdout.splitlines():
+                        if "level:" in bl:
+                            batt = bl.split(":")[1].strip() + "%"
+                        if "status: 2" in bl or "AC powered: true" in bl or "USB powered: true" in bl:
+                            charging = True
+                    if batt and charging:
+                        batt += " ⚡"
+                except Exception:
+                    pass
+                devices.append({"serial": serial, "model": model, "battery": batt or "100%", "type": "adb"})
+    except Exception:
+        pass
+    return devices
+
+def check_vivo_tailscale():
+    try:
+        proc = subprocess.run(["tailscale", "status", "--json"], capture_output=True, text=True, timeout=0.5)
+        if proc.returncode == 0:
+            data = json.loads(proc.stdout)
+            peers = data.get("Peer", {})
+            vivo_candidates = []
+            for node_key, peer in peers.items():
+                host = peer.get("HostName", "").lower()
+                dns = peer.get("DNSName", "").lower()
+                os_type = peer.get("OS", "").lower()
+                if "v2428" in host or "v2428" in dns or os_type == "android":
+                    addrs = peer.get("TailscaleIPs", [])
+                    ip_str = addrs[0] if addrs else "unknown"
+                    online = peer.get("Online", False)
+                    vivo_candidates.append({
+                        "device": peer.get("HostName", "Vivo V2428"),
+                        "ip": ip_str,
+                        "online": online,
+                        "os": peer.get("OS", "Android")
+                    })
+            if vivo_candidates:
+                vivo_candidates.sort(key=lambda x: (x["online"], x["device"]), reverse=True)
+                return vivo_candidates[0]
+    except Exception:
+        pass
+    return None
+
+def get_raw_status():
+    cache_f = Path("/tmp/milo-phone-cache.txt")
+    now = time.time()
+    try:
+        if cache_f.exists() and (now - cache_f.stat().st_mtime < 30):
+            cached = cache_f.read_text().strip()
+            if cached:
+                return cached
+    except Exception:
+        pass
+
+    adb_devs = check_adb_devices()
+    result = "Vivo V2428:::Standby:::Tailscale P2P"
+    if adb_devs:
+        d = adb_devs[0]
+        result = f"{d['model']}:::{d['battery']}:::ADB Link Active"
+    else:
+        ts_dev = check_vivo_tailscale()
+        if ts_dev and ts_dev.get("online"):
+            result = f"{ts_dev['device']}:::Online:::Tailnet P2P"
+
+    try:
+        cache_f.write_text(result + "\n")
+    except Exception:
+        pass
+    return result
+
+def mirror_screen():
+    if not shutil.which("scrcpy"):
+        print(f"{RED}Error: scrcpy is not installed.{RESET}")
+        return
+
+    adb_devs = check_adb_devices()
+    cmd = [
+        "scrcpy",
+        "--stay-awake",
+        "--window-title=J.A.R.V.I.S. // Vivo Android Mirror",
+        "--max-size=1080",
+        "--video-bit-rate=8M"
+    ]
+    if adb_devs:
+        cmd.extend(["-s", adb_devs[0]["serial"]])
+
+    print(f"{CYAN}✦ Launching Milo Phone Mirror via scrcpy...{RESET}")
+    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+def drop_file(filepath):
+    path = Path(filepath).resolve()
+    if not path.exists():
+        print(f"{RED}Error: File not found: {filepath}{RESET}")
+        return
+
+    adb_devs = check_adb_devices()
+    if not adb_devs:
+        print(f"{YELLOW}Warning: No USB/Wireless ADB device detected. Connect phone via ADB or cable.{RESET}")
+        return
+
+    serial = adb_devs[0]["serial"]
+    dest = f"/sdcard/Download/{path.name}"
+    print(f"{CYAN}✦ Dropping {path.name} to {dest} on Vivo...{RESET}")
+    res = subprocess.run(["adb", "-s", serial, "push", str(path), dest], capture_output=True, text=True)
+    if res.returncode == 0:
+        print(f"{GREEN}✔ Successfully pushed to Phone Downloads!{RESET}")
+        subprocess.run(["notify-send", "-a", "Milo Phone Link", "File Dropped to Vivo", f"{path.name} -> /sdcard/Download/"], capture_output=True)
+    else:
+        print(f"{RED}✖ Push failed: {res.stderr}{RESET}")
+
+def sync_clipboard():
+    adb_devs = check_adb_devices()
+    if not adb_devs:
+        print(f"{YELLOW}No active ADB phone found to sync clipboard.{RESET}")
+        return
+
+    try:
+        cb_res = subprocess.run(["wl-paste"], capture_output=True, text=True)
+        clip_text = cb_res.stdout.strip()
+        if not clip_text:
+            print("Desktop clipboard is empty.")
+            return
+
+        serial = adb_devs[0]["serial"]
+        # Set phone clipboard via adb shell
+        escaped = clip_text.replace('"', '\\"')
+        subprocess.run(["adb", "-s", serial, "shell", f"am broadcast -a clipper.set -e text \"{escaped}\""], capture_output=True)
+        print(f"{GREEN}✔ Synced desktop clipboard to Vivo Phone!{RESET}")
+    except Exception as e:
+        print(f"Clipboard sync note: {e}")
+
+def print_dashboard():
+    print(f"\n{BOLD}{CYAN}╔═══════════════════════════════════════════════════════════════╗{RESET}")
+    print(f"{BOLD}{CYAN}║            📱 MILO VIVO ANDROID REMOTE COMPANION             ║{RESET}")
+    print(f"{BOLD}{CYAN}╚═══════════════════════════════════════════════════════════════╝{RESET}\n")
+
+    adb_devs = check_adb_devices()
+    ts_dev = check_vivo_tailscale()
+    ips = get_ips()
+
+    if adb_devs:
+        d = adb_devs[0]
+        print(f" {BOLD}Hardware Link:{RESET} {GREEN}● USB/Wireless ADB Active — {d['model']} (Battery: {d['battery']}){RESET}")
+    elif ts_dev:
+        status_color = GREEN if ts_dev["online"] else YELLOW
+        status_label = "● Connected & Active" if ts_dev["online"] else "○ Standby / Idle"
+        print(f" {BOLD}Vivo Device:{RESET}   {status_color}{ts_dev['device']} ({ts_dev['ip']}) — {status_label}{RESET}")
+    else:
+        print(f" {BOLD}Vivo Device:{RESET}   {YELLOW}Vivo V2428 (Tailscale P2P registered){RESET}")
+
+    wifi_ip = ips.get("wifi", "10.250.235.95")
+    ts_ip = ips.get("tailscale", "100.64.64.21")
+    print(f" {BOLD}Local Wi-Fi:{RESET}   {wifi_ip}:3140")
+    print(f" {BOLD}Tailnet P2P:{RESET}   {ts_ip}:3140\n")
+
+    print(f" {BOLD}{GREEN}► GLOBAL REMOTE URL (Outside Home / Cellular 4G/5G):{RESET}")
+    print(f"   {BOLD}{CYAN}{GLOBAL_URL}{RESET}\n")
+
+    print(f" {BOLD}{MAGENTA}► NATIVE ANDROID APK DOWNLOAD:{RESET}")
+    print(f"   {DIM}{APK_URL}{RESET}\n")
+
+    print(f"{BOLD}Scan this QR code with your Vivo camera to connect instantly:{RESET}\n")
+    try:
+        subprocess.run(["qrencode", "-t", "ANSIUTF8", GLOBAL_URL])
+    except Exception:
+        print(" (Install qrencode to render terminal QR code)")
+
+    print(f"\n{DIM}Quick Commands:{RESET}")
+    print(f" • {CYAN}milo-phone mirror{RESET}        Launch zero-latency scrcpy screen mirror")
+    print(f" • {CYAN}milo-phone drop <file>{RESET}  Push file directly to phone Downloads")
+    print(f" • {CYAN}milo-phone clip{RESET}         Push desktop clipboard to phone")
+    print(f" • {CYAN}milo-call [message]{RESET}     Send PTT voice note call to WhatsApp\n")
+
+def main():
+    if len(sys.argv) > 1:
+        cmd = sys.argv[1].lower()
+        if cmd in ("mirror", "scrcpy", "screen"):
+            mirror_screen()
+        elif cmd in ("drop", "push", "send-file"):
+            if len(sys.argv) > 2:
+                drop_file(sys.argv[2])
+            else:
+                print("Usage: milo-phone drop <filepath>")
+        elif cmd in ("clip", "clipboard", "sync-clip"):
+            sync_clipboard()
+        elif cmd in ("raw-status", "status-raw"):
+            print(get_raw_status())
+        elif cmd in ("call", "voice"):
+            args = sys.argv[2:]
+            subprocess.run([str(Path.home() / ".local/bin/milo-call")] + args)
+        else:
+            print_dashboard()
+    else:
+        print_dashboard()
+
+if __name__ == "__main__":
+    main()

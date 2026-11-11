@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+"""
+Milo Sentinel — Autonomous Hardware & VRAM Governor for MiloOS
+Monitors Hyprland windows and processes for games, auto-evicting resident AI
+models from GPU VRAM when gaming, and restoring them when done.
+"""
+
+import os
+import sys
+import time
+import json
+import subprocess
+from pathlib import Path
+
+STATE_DIR = Path.home() / ".config" / "milo"
+GAMEMODE_STATE = STATE_DIR / "gamemode.state"
+SENTINEL_PAUSE = STATE_DIR / "sentinel.paused"
+LOG_FILE = Path.home() / ".local" / "share" / "milo" / "sentinel.log"
+
+GAME_CLASSES = {
+    "steam_app_",
+    "gamescope",
+    "lutris",
+    "heroic",
+    "retroarch",
+    "rpcs3",
+    "yuzu",
+    "ryujinx",
+    "dolphin-emu",
+    "pcsx2",
+    "ppsspp",
+    "wine",
+    "proton",
+}
+
+GAME_BINARIES = [
+    "steam_app",
+    "gamescope",
+    "lutris-wrapper",
+    "wine64-preloader",
+    "wineserver",
+    "proton",
+    "retroarch",
+    "rpcs3",
+]
+
+def log(msg: str):
+    timestamp = time.strftime("[%Y-%m-%d %H:%M:%S]")
+    line = f"{timestamp} {msg}"
+    print(line, flush=True)
+    try:
+        LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(LOG_FILE, "a") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+
+def is_gamemode_active() -> bool:
+    return GAMEMODE_STATE.exists()
+
+def detect_running_game():
+    """Returns game identifier if a game window or process is detected, else None."""
+    # 1. Check Hyprland clients
+    try:
+        res = subprocess.run(["hyprctl", "clients", "-j"], capture_output=True, text=True, timeout=2)
+        if res.returncode == 0 and res.stdout.strip():
+            clients = json.loads(res.stdout)
+            for c in clients:
+                cls = (c.get("class") or "").lower()
+                initial_cls = (c.get("initialClass") or "").lower()
+                title = (c.get("title") or "").lower()
+                
+                # Ignore Steam client window itself, focus on actual games
+                if cls == "steam" and not ("steam_app_" in initial_cls or "steam_app_" in title):
+                    continue
+
+                for gc in GAME_CLASSES:
+                    if gc in cls or gc in initial_cls:
+                        return f"Window: {cls or initial_cls} ({c.get('title', 'Unknown')})"
+    except Exception:
+        pass
+
+    # 2. Check process table for known game binaries
+    for binary in GAME_BINARIES:
+        try:
+            res = subprocess.run(["pgrep", "-f", binary], capture_output=True, text=True, timeout=1)
+            if res.returncode == 0 and res.stdout.strip():
+                # Verify it's not our own sentinel script
+                pids = res.stdout.strip().split()
+                if pids:
+                    return f"Process: {binary} (PID {pids[0]})"
+        except Exception:
+            pass
+
+    return None
+
+def trigger_game_on(game_desc: str):
+    log(f"🎮 Game detected [{game_desc}]. Engaging Zero-Click Game Mode (100% VRAM to Game)...")
+    try:
+        subprocess.run([str(Path.home() / ".local/bin/milo-game"), "on"], check=False)
+    except Exception as e:
+        log(f"Error engaging game mode: {e}")
+
+def trigger_game_off():
+    log("⚡ Game session terminated. Restoring Milo AI daemons (Kokoro TTS & Cortex)...")
+    try:
+        subprocess.run([str(Path.home() / ".local/bin/milo-game"), "off"], check=False)
+    except Exception as e:
+        log(f"Error disengaging game mode: {e}")
+
+def run_loop():
+    log("✦ Milo Sentinel VRAM Governor started. Monitoring Hyprland & process state...")
+    missing_count = 0
+    MISSING_THRESHOLD = 3  # 3 cycles * 3s = 9s debounce
+
+    while True:
+        try:
+            if SENTINEL_PAUSE.exists():
+                time.sleep(5)
+                continue
+
+            game = detect_running_game()
+            gamemode_on = is_gamemode_active()
+
+            if game:
+                missing_count = 0
+                if not gamemode_on:
+                    trigger_game_on(game)
+            else:
+                if gamemode_on:
+                    missing_count += 1
+                    if missing_count >= MISSING_THRESHOLD:
+                        trigger_game_off()
+                        missing_count = 0
+                else:
+                    missing_count = 0
+
+            time.sleep(3)
+        except KeyboardInterrupt:
+            log("✦ Milo Sentinel stopped by user.")
+            sys.exit(0)
+        except Exception as e:
+            log(f"Unexpected error in monitor loop: {e}")
+            time.sleep(5)
+
+def main():
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "start"
+    if cmd == "start":
+        run_loop()
+    elif cmd == "check":
+        game = detect_running_game()
+        active = is_gamemode_active()
+        print(f"Game detected: {game or 'None'}")
+        print(f"Game Mode active: {active}")
+    elif cmd == "status":
+        active = is_gamemode_active()
+        paused = SENTINEL_PAUSE.exists()
+        print(f"Milo Sentinel Status:")
+        print(f"  • Governor Paused: {paused}")
+        print(f"  • Game Mode Active: {active}")
+    elif cmd == "pause":
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        SENTINEL_PAUSE.touch()
+        print("✦ Milo Sentinel paused.")
+    elif cmd == "resume":
+        if SENTINEL_PAUSE.exists():
+            SENTINEL_PAUSE.unlink()
+        print("✦ Milo Sentinel resumed.")
+    else:
+        print("Usage: milo-sentinel {start|check|status|pause|resume}")
+
+if __name__ == "__main__":
+    main()

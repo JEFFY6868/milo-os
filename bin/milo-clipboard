@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Milo Clipboard AI Action
+# Grabs current clipboard contents, triggers Milo analysis, and displays on desktop HUD
+set -eo pipefail
+
+CLIPBOARD_TEXT=$(wl-paste --no-newline 2>/dev/null || true)
+CLIPBOARD_TRIMMED=$(echo "$CLIPBOARD_TEXT" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+
+if [[ -z "$CLIPBOARD_TRIMMED" ]]; then
+  notify-send -a "Milo AI" -u low -i "edit-copy" "Clipboard is Empty" "Copy some text or code first, then press Super+Shift+Space."
+  exit 0
+fi
+
+# Limit to first 3000 chars for fast processing
+SNIPPET="${CLIPBOARD_TRIMMED:0:3000}"
+PREVIEW=$(echo "${CLIPBOARD_TRIMMED}" | head -n 1 | cut -c 1-60)
+notify-send -a "Milo AI" -u normal -i "system-search" "Milo Analyzing Clipboard" "Analyzing: \"${PREVIEW}...\""
+
+PROMPT="Please analyze, explain, or summarize this clipboard content clearly and concisely:
+
+${SNIPPET}"
+
+# Ask Milo via desktop HUD IPC
+omarchy-shell milo ask "$PROMPT" >/dev/null 2>&1 || /usr/local/bin/milo-query "$PROMPT" >/dev/null 2>&1 &

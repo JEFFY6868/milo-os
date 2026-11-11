@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "milo.hud",
+  "name": "Milo AI Desktop",
+  "version": "1.0.0",
+  "author": "MiloOS Team",
+  "description": "Milo AI ambient desktop wallpaper companion and assistant",
+  "kinds": ["service"],
+  "entryPoints": {
+    "service": "MiloService.qml"
+  }
+}

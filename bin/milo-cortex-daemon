@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Milo Cortex Daemon Manager — Fast Resident Model Supervisor
+# Part of MiloOS. Built for Arch Linux & Hyprland.
+# ==============================================================================
+set -e
+
+get_socket_path() {
+    if [ -n "$XDG_RUNTIME_DIR" ] && [ -S "$XDG_RUNTIME_DIR/milo-cortex.sock" ]; then
+        echo "$XDG_RUNTIME_DIR/milo-cortex.sock"
+    elif [ -S "/tmp/milo-cortex-$(id -u).sock" ]; then
+        echo "/tmp/milo-cortex-$(id -u).sock"
+    elif [ -n "$XDG_RUNTIME_DIR" ] && [ -d "$XDG_RUNTIME_DIR" ] && [ -w "$XDG_RUNTIME_DIR" ]; then
+        echo "$XDG_RUNTIME_DIR/milo-cortex.sock"
+    else
+        echo "/tmp/milo-cortex-$(id -u).sock"
+    fi
+}
+
+SOCKET_PATH=$(get_socket_path)
+SERVICE_NAME="milo-cortex.service"
+DAEMON_SCRIPT="${HOME}/.local/share/milo/cortex/daemon.py"
+PYTHON_BIN="${HOME}/.local/share/milo/venv/bin/python3"
+PID_FILE="$HOME/.local/share/milo/cortex/daemon.pid"
+LOG_FILE="$HOME/.local/share/milo/cortex/daemon.log"
+
+cmd="${1:-status}"
+
+is_socket_alive() {
+    local sock
+    sock=$(get_socket_path)
+    if [ -S "$sock" ]; then
+        python3 -c "
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(1.5)
+success = False
+try:
+    s.connect('$sock')
+    s.sendall(json.dumps({'action': 'ping'}).encode() + b'\n')
+    data = json.loads(s.recv(1024).decode())
+    if data.get('status') == 'pong':
+        success = True
+except Exception:
+    pass
+finally:
+    s.close()
+sys.exit(0 if success else 1)
+" 2>/dev/null
+        return $?
+    fi
+    return 1
+}
+
+case "$cmd" in
+    --help|-h|help)
+        echo "Usage: milo-cortex-daemon {start|stop|restart|enable|disable|status|ping|logs}"
+        exit 0
+        ;;
+    start)
+        if is_socket_alive; then
+            echo -e "\033[32m✔ Milo Cortex Daemon is already running and warm!\033[0m"
+            exit 0
+        fi
+
+        echo "🚀 Starting Milo Cortex Resident Daemon..."
+        # 1. Try systemd if user bus is connected
+        if systemctl --user is-system-running &>/dev/null; then
+            systemctl --user start "$SERVICE_NAME" 2>/dev/null || true
+            sleep 1
+        fi
+
+        # 2. If socket is still not up, start directly via background process
+        if ! is_socket_alive; then
+            echo "⚡ Launching daemon in background process mode..."
+            nohup "$PYTHON_BIN" "$DAEMON_SCRIPT" > "$LOG_FILE" 2>&1 &
+            # Wait up to 6 seconds for model to load and warm up
+            for i in {1..12}; do
+                if is_socket_alive; then
+                    break
+                fi
+                sleep 0.5
+            done
+        fi
+
+        if is_socket_alive; then
+            echo -e "\033[32m✔ Milo Cortex Daemon is ACTIVE and warm in memory!\033[0m"
+            "$0" ping
+        else
+            echo -e "\033[31m❌ Failed to start daemon. Check $LOG_FILE\033[0m"
+            exit 1
+        fi
+        ;;
+    stop)
+        echo "🛑 Stopping Milo Cortex Resident Daemon..."
+        systemctl --user stop "$SERVICE_NAME" 2>/dev/null || true
+        if [ -f "$PID_FILE" ]; then
+            pid=$(cat "$PID_FILE")
+            if kill -0 "$pid" 2>/dev/null; then
+                kill "$pid" 2>/dev/null || true
+            fi
+            rm -f "$PID_FILE"
+        fi
+        if [ -S "$SOCKET_PATH" ]; then
+            rm -f "$SOCKET_PATH"
+        fi
+        echo -e "\033[33m✔ Milo Cortex Daemon stopped.\033[0m"
+        ;;
+    restart)
+        "$0" stop
+        sleep 1
+        "$0" start
+        ;;
+    enable)
+        echo "✨ Enabling Milo Cortex Daemon on user login..."
+        systemctl --user enable --now "$SERVICE_NAME" 2>/dev/null || true
+        # Also ensure it's in autostart.lua for Hyprland
+        if [ -f "$HOME/.config/hypr/autostart.lua" ]; then
+            if ! grep -q "milo-cortex-daemon" "$HOME/.config/hypr/autostart.lua"; then
+                echo 'o.launch_on_start("${HOME}/.local/bin/milo-cortex-daemon start")' >> "$HOME/.config/hypr/autostart.lua"
+                echo "✔ Added to ~/.config/hypr/autostart.lua"
+            fi
+        fi
+        ;;
+    disable)
+        echo "💤 Disabling Milo Cortex Daemon..."
+        systemctl --user disable --now "$SERVICE_NAME" 2>/dev/null || true
+        if [ -f "$HOME/.config/hypr/autostart.lua" ]; then
+            sed -i '/milo-cortex-daemon/d' "$HOME/.config/hypr/autostart.lua"
+        fi
+        ;;
+    status)
+        if is_socket_alive; then
+            echo -e "\033[32m● Milo Cortex Daemon is RUNNING (active & warm)\033[0m"
+            echo "📡 Socket: $SOCKET_PATH"
+            "$0" ping
+        else
+            echo -e "\033[33m○ Milo Cortex Daemon is INACTIVE (stopped)\033[0m"
+            echo "Run 'milo-cortex-daemon start' to launch it into resident memory."
+        fi
+        ;;
+    ping)
+        if [ ! -S "$SOCKET_PATH" ]; then
+            echo "❌ Socket not found at $SOCKET_PATH (daemon not running)"
+            exit 1
+        fi
+        python3 -c "
+import socket, json
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(2.0)
+s.connect('$SOCKET_PATH')
+s.sendall(json.dumps({'action': 'ping'}).encode() + b'\n')
+data = json.loads(s.recv(1024).decode())
+print(f'⚡ Model:   {data.get(\"model\")} (Resident: {data.get(\"resident\")})')
+print(f'⏱️ Uptime:  {data.get(\"uptime_sec\")}s | Served: {data.get(\"queries_served\")} queries ({data.get(\"total_tokens\")} tokens)')
+s.close()
+"
+        ;;
+    logs)
+        if [ -f "$LOG_FILE" ]; then
+            tail -n 50 -f "$LOG_FILE"
+        else
+            journalctl --user -u "$SERVICE_NAME" -n 50 -f
+        fi
+        ;;
+    *)
+        echo "Usage: milo-cortex-daemon {start|stop|restart|enable|disable|status|ping|logs}"
+        exit 1
+        ;;
+esac

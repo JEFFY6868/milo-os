@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Trigger for Milo Autonomous Upgrade Formulation
+Persistent=true
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

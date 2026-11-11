@@ -1,0 +1,10 @@
+[Unit]
+Description=Milo Autonomous Evolution & Audit Engine
+Documentation=file://%h/.local/share/milo/evolution
+After=milo-cortex.service milo-voice.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/milo-evolve audit
+StandardOutput=journal
+StandardError=journal

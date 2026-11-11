@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Milo Unified Query Engine — Hybrid Online/Offline Intelligence Router
+# Part of MiloOS. Built for Arch Linux, Hyprland & Obsidian.
+# ==============================================================================
+set -eo pipefail
+
+VAULT_DIR="${HOME}/Documents/Obsidian/Milo"
+DAILY_DIR="${VAULT_DIR}/Daily"
+TODAY=$(date +%Y-%m-%d)
+TIMESTAMP=$(date +"%H:%M")
+DAILY_FILE="${DAILY_DIR}/${TODAY}.md"
+
+QUERY="$*"
+if [[ -z "$QUERY" ]]; then
+  echo "Error: No query provided to milo-query" >&2
+  exit 1
+fi
+
+# Ensure daily directory exists if writable
+mkdir -p "$DAILY_DIR" 2>/dev/null || true
+
+if [[ ! -f "$DAILY_FILE" && -w "$DAILY_DIR" ]]; then
+  cat <<EOF > "$DAILY_FILE" 2>/dev/null || true
+# 📅 Daily Note: ${TODAY}
+
+## 💬 Conversations & Interaction Log
+
+EOF
+fi
+
+PYTHON_BIN="${HOME}/.local/share/milo/venv/bin/python3"
+ROUTER_SCRIPT="${HOME}/.local/share/milo/cortex/intelligence_router.py"
+
+# Execute through Hybrid Intelligence Router
+RAW_OUTPUT=$("$PYTHON_BIN" "$ROUTER_SCRIPT" ask "$QUERY" 2>/tmp/milo-query-debug.log || true)
+
+# Extract response and provider
+if [[ "$RAW_OUTPUT" =~ ^\[(.*)\]:\ (.*) ]]; then
+  PROVIDER="${BASH_REMATCH[1]}"
+  RESPONSE="${BASH_REMATCH[2]}"
+else
+  PROVIDER="Fallback"
+  RESPONSE="${RAW_OUTPUT:-Standing by, Jeffy.}"
+fi
+
+# Append interaction to Obsidian daily note if writable
+if [[ -w "$DAILY_DIR" || -w "$DAILY_FILE" ]]; then
+  cat <<EOF >> "$DAILY_FILE" 2>/dev/null || true
+### ${TIMESTAMP} - Interaction [${PROVIDER}]
+- **Jeffy:** ${QUERY}
+- **Milo:** ${RESPONSE}
+
+EOF
+fi
+
+# Output clean response to stdout for Milo Wallpaper / HUD immediately
+echo "$RESPONSE"
+
+# Non-blocking background speech synthesis if voice is enabled
+nohup ${HOME}/.local/bin/milo-speak "$RESPONSE" </dev/null >/dev/null 2>&1 & disown || true
+
+# Non-blocking background reflection (completely detached from stdout)
+nohup /usr/local/bin/milo-reflect </dev/null >/dev/null 2>&1 & disown || true

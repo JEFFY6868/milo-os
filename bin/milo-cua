@@ -1,0 +1,270 @@
+#!/usr/bin/env python3
+"""
+Milo Cua — Desktop GUI Computer-Use Agent Interface
+Integrates trycua/cua with Arch Linux (Hyprland Wayland) and Milo AI.
+Provides CLI desktop automation, screenshot observation, and MCP server management.
+"""
+
+import os
+import sys
+import argparse
+import subprocess
+from pathlib import Path
+from datetime import datetime
+
+VENV_PYTHON = Path.home() / "/.local/share/cua/venv/bin/python")
+VENV_CUA = Path.home() / "/.local/share/cua/venv/bin/cua")
+SCREENSHOT_DIR = Path.home() / ".local/share/milo/screenshots"
+
+# Ensure desktop environment variables for Wayland/XWayland
+os.environ.setdefault("DISPLAY", ":0")
+os.environ.setdefault("WAYLAND_DISPLAY", "wayland-1")
+os.environ.setdefault("XDG_RUNTIME_DIR", "/run/user/1000")
+
+# Terminal formatting
+CYAN = "\033[36m"
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+RED = "\033[31m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
+RESET = "\033[0m"
+
+
+def check_runtime():
+    if not VENV_PYTHON.exists():
+        print(f"{RED}Error: Cua virtualenv not found at {VENV_PYTHON}{RESET}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_status():
+    check_runtime()
+    print(f"\n{BOLD}{CYAN}🖥️  MILO CUA DESKTOP COMPUTER-USE AGENT{RESET}")
+    print(f"{DIM}Open-Source OS Automation & Grounding Engine (trycua/cua){RESET}\n")
+
+    # Display & Compositor
+    display = os.environ.get("DISPLAY", "None")
+    wl_display = os.environ.get("WAYLAND_DISPLAY", "None")
+    print(f"  {BOLD}Compositor:{RESET}  Hyprland (Wayland)")
+    print(f"  {BOLD}Wayland Socket:{RESET} {GREEN}{wl_display}{RESET}")
+    print(f"  {BOLD}XWayland Display:{RESET} {GREEN}{display}{RESET}")
+
+    # Resolution & Cursor
+    res_code = """
+from PIL import ImageGrab
+from pynput.mouse import Controller
+try:
+    img = ImageGrab.grab()
+    m = Controller()
+    print(f"{img.width}x{img.height}:::{int(m.position[0])}:::{int(m.position[1])}")
+except Exception as e:
+    print(f"ERR:::{e}")
+"""
+    res = subprocess.run([str(VENV_PYTHON), "-c", res_code], capture_output=True, text=True)
+    out = res.stdout.strip()
+    if ":::" in out and not out.startswith("ERR"):
+        parts = out.split(":::")
+        print(f"  {BOLD}Resolution:{RESET}  {GREEN}{parts[0]}{RESET} (Full Native Canvas)")
+        print(f"  {BOLD}Cursor Pos:{RESET}  X={parts[1]}, Y={parts[2]}")
+    else:
+        print(f"  {BOLD}Display State:{RESET} {YELLOW}Standby / Headless{RESET}")
+
+    # MCP Server Status
+    mcp_config = Path.home() / "/.gemini/antigravity/mcp_config.json")
+    if mcp_config.exists() and '"cua"' in mcp_config.read_text():
+        print(f"  {BOLD}MCP Bridge:{RESET}  {GREEN}● Active in Antigravity & Jetski (~/.gemini/antigravity/mcp_config.json){RESET}")
+    else:
+        print(f"  {BOLD}MCP Bridge:{RESET}  {YELLOW}○ Not configured{RESET}")
+
+    # Tool Schemas
+    schema_dir = Path.home() / "/.gemini/antigravity-cli/mcp/cua")
+    if schema_dir.exists():
+        tool_count = len(list(schema_dir.glob("*.json")))
+        print(f"  {BOLD}MCP Tools:{RESET}   {GREEN}{tool_count} Desktop Tools Registered{RESET} (Screenshot, Click, Keys, Windows)")
+
+    print(f"\n{DIM}Quick Actions:{RESET}")
+    print("  • milo cua shot             Capture full desktop frame")
+    print("  • milo cua click <x> <y>    Simulate mouse click at coordinate")
+    print("  • milo cua type \"<text>\"    Type string into focused element")
+    print("  • milo cua mcp              Launch Stdio MCP server for LLMs")
+    print("  • milo cua server           Start HTTP/WebSocket API daemon\n")
+
+
+def cmd_shot(output_file: str | None):
+    check_runtime()
+    SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    if not output_file:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        target_path = SCREENSHOT_DIR / f"cua_desktop_{ts}.png"
+    else:
+        target_path = Path(output_file).resolve()
+
+    target_str = str(target_path)
+    code = f"""
+from PIL import ImageGrab
+img = ImageGrab.grab()
+img.save({repr(target_str)})
+print("OK:::" + str(img.width) + "x" + str(img.height))
+"""
+    res = subprocess.run([str(VENV_PYTHON), "-c", code], capture_output=True, text=True)
+    out = res.stdout.strip()
+    if out.startswith("OK:::"):
+        size = out.split(":::")[1]
+        print(f"{GREEN}✔ Desktop captured ({size}):{RESET} {target_path}")
+        subprocess.run(["notify-send", "-a", "Milo Cua", "Desktop Screenshot", f"Captured {size} -> {target_path.name}"], capture_output=True)
+        return str(target_path)
+    else:
+        print(f"{RED}✖ Failed to capture screenshot:{RESET} {res.stderr}")
+        return None
+
+
+def cmd_click(x: int, y: int, button: str = "left", double: bool = False):
+    check_runtime()
+    code = f"""
+from pynput.mouse import Controller, Button
+import time
+m = Controller()
+m.position = ({x}, {y})
+btn = Button.{button}
+if {double}:
+    m.click(btn, 2)
+else:
+    m.click(btn, 1)
+print(f"CLICKED:::{x}:::{y}")
+"""
+    res = subprocess.run([str(VENV_PYTHON), "-c", code], capture_output=True, text=True)
+    if "CLICKED" in res.stdout:
+        action = "Double-clicked" if double else "Clicked"
+        print(f"{GREEN}✔ {action} {button} mouse button at ({x}, {y}){RESET}")
+    else:
+        print(f"{RED}✖ Click failed:{RESET} {res.stderr}")
+
+
+def cmd_type(text: str):
+    check_runtime()
+    code = f"""
+from pynput.keyboard import Controller
+import time
+kb = Controller()
+text = {repr(text)}
+for ch in text:
+    kb.type(ch)
+    time.sleep(0.01)
+print("TYPED")
+"""
+    res = subprocess.run([str(VENV_PYTHON), "-c", code], capture_output=True, text=True)
+    if "TYPED" in res.stdout:
+        print(f"{GREEN}✔ Typed {len(text)} characters into active window.{RESET}")
+    else:
+        print(f"{RED}✖ Type failed:{RESET} {res.stderr}")
+
+
+def cmd_key(key_name: str):
+    check_runtime()
+    code = f"""
+from pynput.keyboard import Controller, Key
+kb = Controller()
+k = getattr(Key, {repr(key_name)}, None)
+if k:
+    kb.press(k)
+    kb.release(k)
+    print("KEY_PRESSED")
+else:
+    kb.type({repr(key_name)})
+    print("KEY_TYPED")
+"""
+    res = subprocess.run([str(VENV_PYTHON), "-c", code], capture_output=True, text=True)
+    if "KEY" in res.stdout:
+        print(f"{GREEN}✔ Key '{key_name}' dispatched.{RESET}")
+    else:
+        print(f"{RED}✖ Key dispatch failed:{RESET} {res.stderr}")
+
+
+def cmd_mcp():
+    check_runtime()
+    # Runs the Cua computer server MCP stdio mode
+    cmd = [str(VENV_PYTHON), "-m", "computer_server.mcp_server"]
+    os.execv(cmd[0], cmd)
+
+
+def cmd_server(port: int = 8000):
+    check_runtime()
+    print(f"{CYAN}✦ Launching Cua Computer Server API daemon on port {port}...{RESET}")
+    cmd = [
+        str(VENV_PYTHON),
+        "-m",
+        "computer_server",
+        "--backend", "native",
+        "--host", "127.0.0.1",
+        "--port", str(port),
+        "--detect-resolution"
+    ]
+    os.execv(cmd[0], cmd)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Milo Cua Desktop Computer-Use Interface")
+    subparsers = parser.add_subparsers(dest="command", help="Subcommand to execute")
+
+    # Status
+    subparsers.add_parser("status", help="Inspect desktop display, resolution, cursor, and MCP state")
+
+    # Screenshot
+    shot_p = subparsers.add_parser("shot", help="Capture a screenshot of current desktop")
+    shot_p.add_argument("output", nargs="?", default=None, help="Output image file path (optional)")
+
+    # Click
+    click_p = subparsers.add_parser("click", help="Click at screen coordinates")
+    click_p.add_argument("x", type=int, help="X coordinate (pixels)")
+    click_p.add_argument("y", type=int, help="Y coordinate (pixels)")
+    click_p.add_argument("--button", "-b", default="left", choices=["left", "right", "middle"], help="Mouse button")
+    click_p.add_argument("--double", "-d", action="store_true", help="Perform double click")
+
+    # Type
+    type_p = subparsers.add_parser("type", help="Type text into active element")
+    type_p.add_argument("text", help="Text to type")
+
+    # Key
+    key_p = subparsers.add_parser("key", help="Press a key (e.g. enter, space, tab, backspace, esc)")
+    key_p.add_argument("key_name", help="Key name to press")
+
+    # MCP
+    subparsers.add_parser("mcp", help="Run the Stdio MCP server for LLMs")
+
+    # Server
+    server_p = subparsers.add_parser("server", help="Start background HTTP/WebSocket daemon")
+    server_p.add_argument("--port", "-p", type=int, default=8000, help="Port to bind")
+
+    # Autonomous Do Loop
+    do_p = subparsers.add_parser("do", help="Run autonomous vision-action loop for a goal")
+    do_p.add_argument("goal", nargs="+", help="Goal description")
+    do_p.add_argument("--max-steps", "-m", type=int, default=15, help="Maximum action steps")
+    do_p.add_argument("--quiet", "-q", action="store_true", help="Quiet mode")
+
+    args = parser.parse_args()
+
+    if not args.command or args.command == "status":
+        cmd_status()
+    elif args.command == "shot":
+        cmd_shot(args.output)
+    elif args.command == "click":
+        cmd_click(args.x, args.y, button=args.button, double=args.double)
+    elif args.command == "type":
+        cmd_type(args.text)
+    elif args.command == "key":
+        cmd_key(args.key_name)
+    elif args.command == "mcp":
+        cmd_mcp()
+    elif args.command == "server":
+        cmd_server(port=args.port)
+    elif args.command == "do":
+        cmd = [str(Path.home() / ".local/bin/milo-do")] + args.goal
+        if args.max_steps != 15:
+            cmd.extend(["-m", str(args.max_steps)])
+        if args.quiet:
+            cmd.append("-q")
+        os.execv(cmd[0], cmd)
+
+
+if __name__ == "__main__":
+    main()

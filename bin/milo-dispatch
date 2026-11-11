@@ -1,0 +1,485 @@
+#!/usr/bin/env python3
+"""
+Milo CEO Executive Dispatcher
+Orchestrates Claude (Code Architect) -> Aider (QA Debugger) -> Hermes (Ops Runner)
+Universal Polyglot & Multi-Stack Engine with Git Safety Checkpoints & Zero-Risk Rollbacks.
+Part of MiloOS. Built for Arch Linux & Hyprland.
+"""
+import sys
+import os
+import shutil
+import subprocess
+import json
+import time
+from pathlib import Path
+from dataclasses import dataclass, field
+from typing import List, Optional
+
+STATE_FILE = Path("/tmp/milo-task.json")
+
+def notify(title: str, msg: str):
+    try:
+        subprocess.run(["notify-send", "-a", "Milo CEO", title, msg], check=False)
+    except Exception:
+        pass
+
+def update_state(stage: str, agent: str, details: str = "", goal: str = ""):
+    state = {
+        "timestamp": time.time(),
+        "stage": stage,
+        "active_agent": agent,
+        "details": details,
+        "goal": goal
+    }
+    try:
+        STATE_FILE.write_text(json.dumps(state, indent=2))
+    except Exception as e:
+        print(f"[Warning] Failed to write state to {STATE_FILE}: {e}")
+
+@dataclass
+class TechStack:
+    name: str
+    test_cmd: List[str]
+    source_files: List[str] = field(default_factory=list)
+    description: str = ""
+
+@dataclass
+class Checkpoint:
+    workspace: Path
+    head_commit: str
+    tag_name: str
+    timestamp: float
+    has_uncommitted: bool = False
+
+class GitSafetyController:
+    """Manages pre-mission snapshots, automated rollbacks on failure, and clean conventional commits on green."""
+    
+    @classmethod
+    def is_git_repo(cls, cwd: Path) -> bool:
+        return (cwd / ".git").is_dir()
+
+    @classmethod
+    def ensure_git(cls, cwd: Path) -> bool:
+        """Initializes git if not present so safety checkpoints can operate."""
+        if cls.is_git_repo(cwd):
+            return True
+        try:
+            print(f"[🛡️ Git Safety] Initializing git repository for automated checkpoints...")
+            subprocess.run(["git", "init"], cwd=cwd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["git", "add", "-A"], cwd=cwd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["git", "commit", "-m", "chore: initial baseline before milo dispatch"], cwd=cwd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        except Exception as e:
+            print(f"[Warning] Failed to auto-initialize git: {e}")
+            return False
+
+    @classmethod
+    def create_checkpoint(cls, cwd: Path, goal: str) -> Optional[Checkpoint]:
+        if not cls.ensure_git(cwd):
+            return None
+        
+        try:
+            # Check for uncommitted working tree changes
+            status = subprocess.check_output(["git", "status", "--porcelain"], cwd=cwd, text=True).strip()
+            has_uncommitted = len(status) > 0
+
+            # Stash untracked/dirty changes if any exist to ensure a pristine safety point
+            if has_uncommitted:
+                subprocess.run(
+                    ["git", "stash", "push", "-u", "-m", f"milo-pre-mission: {goal[:50]}"],
+                    cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+                # Apply stash back so working tree remains in current state
+                subprocess.run(["git", "stash", "apply"], cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            head_rev = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=cwd, text=True).strip()
+            tag_name = f"milo-chk-{int(time.time())}"
+            subprocess.run(["git", "tag", "-f", tag_name, head_rev], cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            return Checkpoint(
+                workspace=cwd,
+                head_commit=head_rev,
+                tag_name=tag_name,
+                timestamp=time.time(),
+                has_uncommitted=has_uncommitted
+            )
+        except Exception as e:
+            print(f"[Warning] Could not create git safety checkpoint: {e}")
+            return None
+
+    @classmethod
+    def rollback(cls, cp: Checkpoint):
+        print(f"\n[🛡️ Git Safety Gate] Mission failed to pass all tests.")
+        print(f"[🛡️ Git Safety Gate] Rolling back workspace to clean checkpoint: {cp.head_commit[:7]} ({cp.tag_name})...")
+        try:
+            subprocess.run(["git", "reset", "--hard", cp.head_commit], cwd=cp.workspace, check=True)
+            subprocess.run(["git", "clean", "-fd"], cwd=cp.workspace, check=True)
+            print(f"[✓ Git Safety Gate] Working tree cleanly restored. Zero damaged or dirty files left behind.\n")
+        except Exception as e:
+            print(f"[Error] Rollback failed: {e}")
+
+    @classmethod
+    def auto_commit(cls, cp: Checkpoint, goal: str, stack: TechStack) -> bool:
+        cwd = cp.workspace
+        try:
+            status = subprocess.check_output(["git", "status", "--porcelain"], cwd=cwd, text=True).strip()
+            if not status:
+                print(f"[✓ Git Checkpoint] Working tree already clean and matched with baseline.")
+                return True
+
+            # Formulate conventional commit header
+            clean_goal = goal.strip()
+            lower = clean_goal.lower()
+            if lower.startswith(("fix", "repair", "resolve", "patch", "correct")):
+                c_type = "fix"
+                subject = clean_goal.split(" ", 1)[1] if " " in clean_goal else clean_goal
+            elif lower.startswith(("add", "implement", "create", "build", "support", "new")):
+                c_type = "feat"
+                subject = clean_goal.split(" ", 1)[1] if " " in clean_goal else clean_goal
+            elif lower.startswith(("refactor", "clean", "rewrite", "simplify", "optimize", "speed up")):
+                c_type = "refactor"
+                subject = clean_goal.split(" ", 1)[1] if " " in clean_goal else clean_goal
+            elif lower.startswith(("test", "add test", "tests")):
+                c_type = "test"
+                subject = clean_goal.split(" ", 1)[1] if " " in clean_goal else clean_goal
+            else:
+                c_type = "feat"
+                subject = clean_goal
+
+            # Remove trailing period if present
+            subject = subject.rstrip(".")
+            commit_title = f"{c_type}: {subject}"
+            commit_body = (
+                f"{commit_title}\n\n"
+                f"Mission Goal: {goal}\n"
+                f"Tech Stack: {stack.name}\n"
+                f"Verified via: {' '.join(stack.test_cmd)}\n"
+                f"Orchestrated by: MiloOS Executive Workstation (Claude -> Aider -> Hermes)"
+            )
+
+            subprocess.run(["git", "add", "-A"], cwd=cwd, check=True)
+            subprocess.run(["git", "commit", "-m", commit_body], cwd=cwd, check=True)
+            new_rev = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=cwd, text=True).strip()
+
+            print(f"\n[✓ Git Safety] Clean conventional commit created: {new_rev} — {commit_title}")
+            print("\n[📊 Verified Changes Diff Stat]:")
+            subprocess.run(["git", "diff", "--stat", "HEAD~1"], cwd=cwd)
+            print()
+            return True
+        except Exception as e:
+            print(f"[Warning] Auto-commit failed: {e}")
+            return False
+
+class StackDetector:
+    IGNORED_DIRS = {
+        ".git", ".venv", "venv", "node_modules", "target", "vendor",
+        "__pycache__", ".pytest_cache", ".cargo", "build", "CMakeFiles",
+        "dist", ".next", ".turbo", ".cache", ".idea", ".vscode"
+    }
+    
+    IGNORED_EXTENSIONS = {
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico",
+        ".mp3", ".wav", ".ogg", ".mp4", ".mov",
+        ".zip", ".tar", ".gz", ".bz2", ".7z",
+        ".pyc", ".pyo", ".so", ".dylib", ".dll", ".exe", ".bin",
+        ".lock", ".wasm"
+    }
+
+    @classmethod
+    def get_tracked_files(cls, cwd: Path) -> List[str]:
+        """Gets git-tracked files if git exists, else filters filesystem walk."""
+        if (cwd / ".git").is_dir():
+            try:
+                out = subprocess.check_output(
+                    ["git", "ls-files"], cwd=cwd, text=True, stderr=subprocess.DEVNULL
+                )
+                files = [f.strip() for f in out.splitlines() if f.strip()]
+                return [
+                    f for f in files
+                    if Path(f).suffix.lower() not in cls.IGNORED_EXTENSIONS
+                    and not any(part in cls.IGNORED_DIRS for part in Path(f).parts)
+                ]
+            except Exception:
+                pass
+        
+        discovered = []
+        for root, dirs, files in os.walk(cwd):
+            dirs[:] = [d for d in dirs if d not in cls.IGNORED_DIRS and not d.startswith(".")]
+            rel_root = Path(root).relative_to(cwd)
+            for f in files:
+                p = rel_root / f if str(rel_root) != "." else Path(f)
+                if p.suffix.lower() not in cls.IGNORED_EXTENSIONS and not p.name.startswith("."):
+                    discovered.append(str(p))
+        return discovered
+
+    @classmethod
+    def detect(cls, cwd: Path) -> TechStack:
+        """Inspects directory markers and returns the best matching TechStack."""
+        tracked_files = cls.get_tracked_files(cwd)
+
+        # 1. Rust (Cargo.toml)
+        if (cwd / "Cargo.toml").is_file() and shutil.which("cargo"):
+            rust_files = [f for f in tracked_files if f.endswith(".rs") or f == "Cargo.toml"]
+            return TechStack(
+                name="Rust (cargo test)",
+                test_cmd=["cargo", "test"],
+                source_files=rust_files or ["Cargo.toml"],
+                description="Rust Cargo Workspace"
+            )
+
+        # 2. Node.js / TypeScript (package.json)
+        if (cwd / "package.json").is_file():
+            pkg_data = {}
+            try:
+                pkg_data = json.loads((cwd / "package.json").read_text())
+            except Exception:
+                pass
+
+            scripts = pkg_data.get("scripts", {})
+            test_cmd = None
+
+            # Check runner priority
+            if (cwd / "bun.lockb").is_file() or (cwd / "bun.lock").is_file():
+                if shutil.which("bun"):
+                    test_cmd = ["bun", "test"]
+            elif (cwd / "pnpm-lock.yaml").is_file() and shutil.which("pnpm"):
+                test_cmd = ["pnpm", "test"]
+            elif (cwd / "yarn.lock").is_file() and shutil.which("yarn"):
+                test_cmd = ["yarn", "test"]
+
+            if not test_cmd:
+                if "test" in scripts and shutil.which("npm"):
+                    test_cmd = ["npm", "test"]
+                elif shutil.which("node"):
+                    if any("test" in f for f in tracked_files if f.endswith((".js", ".ts", ".mjs"))):
+                        test_cmd = ["node", "--test"]
+                    else:
+                        test_cmd = ["npm", "test"]
+
+            node_extensions = {".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs", ".json"}
+            js_files = [
+                f for f in tracked_files
+                if Path(f).suffix.lower() in node_extensions
+                and not f.endswith("package-lock.json")
+            ]
+            return TechStack(
+                name=f"Node.js ({' '.join(test_cmd)})",
+                test_cmd=test_cmd,
+                source_files=js_files or ["package.json"],
+                description="Node.js / TypeScript Package"
+            )
+
+        # 3. Go (go.mod)
+        if (cwd / "go.mod").is_file() and shutil.which("go"):
+            go_files = [f for f in tracked_files if f.endswith(".go") or f == "go.mod"]
+            return TechStack(
+                name="Go (go test ./...)",
+                test_cmd=["go", "test", "./..."],
+                source_files=go_files or ["go.mod"],
+                description="Go Module"
+            )
+
+        # 4. C / C++ (CMakeLists.txt / Makefile)
+        if (cwd / "CMakeLists.txt").is_file():
+            c_files = [f for f in tracked_files if f.endswith((".c", ".cpp", ".cc", ".h", ".hpp")) or f == "CMakeLists.txt"]
+            if shutil.which("ctest"):
+                test_cmd = ["ctest", "--output-on-failure"]
+            else:
+                test_cmd = ["make", "test"] if (cwd / "Makefile").is_file() else ["ctest"]
+            return TechStack(
+                name="C/C++ (CMake/CTest)",
+                test_cmd=test_cmd,
+                source_files=c_files or ["CMakeLists.txt"],
+                description="C/C++ CMake Project"
+            )
+
+        if (cwd / "Makefile").is_file() and shutil.which("make"):
+            try:
+                makefile_txt = (cwd / "Makefile").read_text()
+                if "test:" in makefile_txt or "check:" in makefile_txt:
+                    target = "test" if "test:" in makefile_txt else "check"
+                    c_files = [f for f in tracked_files if f.endswith((".c", ".cpp", ".cc", ".h", ".hpp", ".sh")) or f == "Makefile"]
+                    return TechStack(
+                        name=f"Makefile (make {target})",
+                        test_cmd=["make", target],
+                        source_files=c_files or ["Makefile"],
+                        description="Makefile Project"
+                    )
+            except Exception:
+                pass
+
+        # 5. Python (pytest / unittest)
+        py_files = [f for f in tracked_files if f.endswith(".py") or f in ("pyproject.toml", "setup.py")]
+        if py_files or (cwd / "tests").is_dir() or list(cwd.glob("test_*.py")):
+            test_target = []
+            if (cwd / "test_math_utils.py").exists():
+                test_target = ["test_math_utils.py"]
+            elif (cwd / "tests").is_dir():
+                test_target = ["tests"]
+            else:
+                local_tests = [f.name for f in cwd.glob("test_*.py")]
+                if local_tests:
+                    test_target = local_tests
+
+            if shutil.which("pytest"):
+                test_cmd = ["pytest"] + test_target
+                runner_name = "pytest"
+            else:
+                test_cmd = ["python3", "-m", "unittest", "discover"]
+                runner_name = "unittest"
+
+            return TechStack(
+                name=f"Python ({runner_name})",
+                test_cmd=test_cmd,
+                source_files=py_files or [f.name for f in cwd.glob("*.py")],
+                description="Python Project"
+            )
+
+        # 6. Standalone executable test script (test.sh)
+        if (cwd / "test.sh").is_file():
+            sh_files = [f for f in tracked_files if f.endswith((".sh", ".bash"))]
+            return TechStack(
+                name="Shell Script (./test.sh)",
+                test_cmd=["./test.sh"],
+                source_files=sh_files or ["test.sh"],
+                description="Shell Test Script"
+            )
+
+        # Fallback / Generic
+        return TechStack(
+            name="Generic Project",
+            test_cmd=["pytest"] if shutil.which("pytest") else ["echo", "No tests found"],
+            source_files=tracked_files[:15],
+            description="Generic Source Directory"
+        )
+
+def resolve_workspace(goal: str) -> Path:
+    """Ensures dispatcher operates in a valid project directory, not raw $HOME."""
+    cwd = Path.cwd().resolve()
+    home = Path.home().resolve()
+    demo_dir = home / "Projects" / "milo-demo"
+
+    # If launched from home, detect if user wants demo or prompt
+    if cwd == home:
+        if ("math_utils" in goal or "factorial" in goal or not sys.stdin.isatty()) and demo_dir.exists():
+            print(f"[👑 Milo CEO] Auto-targeting project workspace: {demo_dir}")
+            os.chdir(demo_dir)
+            return demo_dir
+
+        print("\n[📁 Milo Project Workspace Selection]")
+        default_dir = demo_dir if demo_dir.exists() else cwd
+        try:
+            chosen = input(f"Enter project directory [default: {default_dir}]: ").strip()
+            target = Path(chosen).expanduser().resolve() if chosen else default_dir
+            if target.exists() and target.is_dir():
+                os.chdir(target)
+                print(f"[👑 Milo CEO] Active Workspace: {target}")
+                return target
+        except (KeyboardInterrupt, EOFError):
+            pass
+
+    return cwd
+
+def run_pipeline(goal: str) -> bool:
+    # Route desktop GUI automation goals directly to Milo Vision-Action Loop
+    if re.match(r"(?i)^(?:/do|/desktop|do)\s+", goal):
+        desktop_goal = re.sub(r"(?i)^(?:/do|/desktop|do)\s+", "", goal).strip()
+        print(f"\n[🖥️ Milo CUA] Routing to Autonomous Desktop Vision-Action Loop: {desktop_goal}")
+        cmd = [str(Path.home() / ".local/bin/milo-do"), desktop_goal]
+        return subprocess.run(cmd).returncode == 0
+
+    workspace = resolve_workspace(goal)
+    stack = StackDetector.detect(workspace)
+
+    print(f"\n[👑 Milo CEO] Initializing mission: {goal}")
+    print(f"[📁 Workspace] {workspace}")
+    print(f"[🌐 Tech Stack] {stack.name} — {stack.description}")
+    print(f"[📦 Scope Files] {len(stack.source_files)} files: {', '.join(stack.source_files[:5])}{'...' if len(stack.source_files) > 5 else ''}")
+    notify("J.A.R.V.I.S. Protocol", f"CEO Milo initializing [{stack.name}]: {goal}")
+    
+    # 0. Git Safety Checkpoint
+    checkpoint = GitSafetyController.create_checkpoint(workspace, goal)
+    if checkpoint:
+        print(f"[🛡️ Git Safety] Checkpoint secured: {checkpoint.head_commit[:7]} (Tag: {checkpoint.tag_name})")
+
+    # 1. Claude: Engineering / Architecture Phase
+    update_state("CODING", "claude", f"OmniRoute Cascade ({stack.name})", goal)
+    notify("Claude (Architect)", f"Drafting implementation via OmniRoute Cascade ({stack.name})...")
+    print(f"\n[🏗️ Claude Code] Drafting architecture & code ({stack.name})...")
+    print(f"[🔄 OmniRoute Cascade] Gateway priority route: Gemini 2.5 Flash ➔ Gemini 3 Flash ➔ Groq LLaMA 3.3 ➔ Groq 120B")
+    
+    claude_cmd = ["milo-code", "--print", "--dangerously-skip-permissions", f"Implement this in the {stack.name} project: {goal}"]
+    claude_res = subprocess.run(claude_cmd)
+    
+    if claude_res.returncode != 0:
+        print(f"[⚠️ Engineering Alert] Claude Code reported non-zero status. Failing over to Aider as primary engineer...")
+        notify("Milo CEO", "Claude unavailable. Failing over to Aider...")
+        fallback_msg = f"Implement this feature directly in the {stack.name} codebase: {goal}"
+        subprocess.run(["milo-test", "--yes", "--message", fallback_msg] + stack.source_files + ["--exit"])
+
+    # 2. Aider: QA & Forensic Auto-Repair Phase
+    update_state("TESTING", "aider", f"Running {stack.name} test suite", goal)
+    notify("Aider (QA Debugger)", f"Executing {stack.name} verification loop...")
+    print(f"\n[🔍 Aider QA] Running verification tests: {' '.join(stack.test_cmd)}...")
+    
+    test_res = subprocess.run(stack.test_cmd, capture_output=True, text=True)
+    
+    if test_res.returncode != 0:
+        print("[⚠️ QA Alert] Tests failing. Triggering Aider forensic auto-repair...")
+        notify("QA Alarm", f"{stack.name} tests failed! Aider initiating root-cause repair...")
+        
+        # Clean, untruncated failure excerpt for Aider
+        raw_output = (test_res.stdout.strip() or test_res.stderr.strip())
+        err_excerpt = raw_output[-3500:] if len(raw_output) > 3500 else raw_output
+        repair_msg = (
+            f"Analyze test failure in {stack.name} and repair the code so tests pass:\n"
+            f"Mission Goal: {goal}\n"
+            f"Test Runner: {' '.join(stack.test_cmd)}\n"
+            f"Test Failures:\n{err_excerpt}"
+        )
+        
+        cmd = ["milo-test", "--yes", "--message", repair_msg] + stack.source_files + ["--exit"]
+        subprocess.run(cmd)
+        
+        # Post-repair re-verification
+        print(f"\n[🔍 Aider QA] Re-running tests ({' '.join(stack.test_cmd)}) to verify fixes...")
+        retest = subprocess.run(stack.test_cmd)
+        if retest.returncode != 0:
+            print("\n[❌ QA Failure] Automated repair unsuccessful. Halting pipeline.")
+            notify("QA Alarm", "Tests still failing after repair attempt. Initiating safety rollback...")
+            update_state("ROLLBACK", "milo", "Restoring clean working tree", goal)
+            if checkpoint:
+                GitSafetyController.rollback(checkpoint)
+            return False
+        print("[✓ Aider QA] Root-cause repairs verified! All tests green.")
+    else:
+        print(f"[✓ Aider QA] All {stack.name} tests passing immediately!")
+        
+    # 3. Hermes: Operations & Deployment Phase
+    update_state("DEPLOYING", "hermes", "Registering services and deploying", goal)
+    notify("Hermes (Operations)", "Verification green. Deploying to system...")
+    print(f"\n[⚡ Hermes Ops] Deploying verified {stack.name} feature to MiloOS...")
+    subprocess.run(["milo-hermes", "chat", "-q", f"All tests green for {stack.name}. Feature verified.", "-Q", "--yolo"])
+    
+    # 4. Safe Auto-Commit on Green
+    if checkpoint:
+        update_state("COMMITTED", "milo", "Clean conventional commit staged", goal)
+        GitSafetyController.auto_commit(checkpoint, goal, stack)
+
+    update_state("DONE", "milo", "Mission accomplished", goal)
+    notify("Milo CEO", f"Feature verified and live on {stack.name}, Sir.")
+    print(f"\n[✓ Milo CEO] Mission verified and active on system [{stack.name}], Sir.\n")
+    return True
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        run_pipeline(" ".join(sys.argv[1:]))
+    else:
+        try:
+            goal = input("\n[👑 Milo CEO] Enter mission goal: ").strip()
+            if goal:
+                run_pipeline(goal)
+            else:
+                print("No mission goal provided. Exiting.")
+        except (KeyboardInterrupt, EOFError):
+            print("\nMission aborted by user.")

@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""
+Milo System Doctor & Health Inspector
+Part of MiloOS. 1-second system health diagnostics, VRAM monitoring,
+service verification, and auto-healing.
+"""
+
+import os
+import sys
+import time
+import shutil
+import subprocess
+from pathlib import Path
+
+def check_gpu():
+    try:
+        res = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.used,memory.free,temperature.gpu", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=2
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            parts = [p.strip() for p in res.stdout.strip().split(",")]
+            used, free, temp = int(parts[0]), int(parts[1]), int(parts[2])
+            status = "✔ OPTIMAL" if free >= 200 else "🟡 LOW HEADROOM"
+            return {
+                "ok": free >= 200,
+                "used": f"{used} MiB",
+                "free": f"{free} MiB",
+                "temp": f"{temp}°C",
+                "status": status
+            }
+    except Exception:
+        pass
+    return {"ok": False, "used": "N/A", "free": "N/A", "temp": "N/A", "status": "🔴 GPU UNAVAILABLE"}
+
+def check_systemd_services():
+    services = [
+        ("milo-sentinel.service", "Hardware & VRAM Governor"),
+        ("milo-cortex.service", "Cognitive Core (Qwen2.5)"),
+        ("milo-voice.service", "Kokoro-82M CUDA Voice"),
+        ("milo-phonon.service", "Phonon-2 Speech ASR"),
+        ("milo-music.service", "Cyber-Soundtrack FLAC"),
+        ("milo-evolution.timer", "Codebase Health Timer"),
+    ]
+    results = []
+    for s, desc in services:
+        try:
+            # Check systemctl --user status
+            res = subprocess.run(["systemctl", "--user", "is-active", s], capture_output=True, text=True, timeout=1)
+            state = res.stdout.strip()
+            ok = state in ("active", "waiting")
+            results.append({"unit": s, "desc": desc, "state": state or "inactive", "ok": ok})
+        except Exception:
+            results.append({"unit": s, "desc": desc, "state": "unknown", "ok": False})
+    return results
+
+def check_audio():
+    sound_fx_dir = Path.home() / ".local" / "share" / "milo" / "sound" / "fx"
+    has_fx = (sound_fx_dir / "chime.wav").exists() and (sound_fx_dir / "chirp.wav").exists()
+    has_player = shutil.which("pw-play") is not None or shutil.which("paplay") is not None
+    is_muted = (Path.home() / ".config" / "milo" / "muted").exists()
+    return {
+        "ok": has_fx and has_player and not is_muted,
+        "fx_installed": has_fx,
+        "pipewire": has_player,
+        "muted": is_muted
+    }
+
+def check_storage():
+    st = os.statvfs(str(Path.home()))
+    free_gb = (st.f_bavail * st.f_frsize) / (1024 ** 3)
+    return {"ok": free_gb > 5.0, "free_gb": f"{free_gb:.1f} GB"}
+
+def prune_stale_locks():
+    pruned = 0
+    now = time.time()
+    for lock in Path("/tmp").glob("milo-*.lock"):
+        try:
+            if now - lock.stat().st_mtime > 3600:
+                lock.unlink()
+                pruned += 1
+        except Exception:
+            pass
+    return pruned
+
+def run_doctor(auto_heal=False):
+    t0 = time.time()
+    gpu = check_gpu()
+    services = check_systemd_services()
+    audio = check_audio()
+    storage = check_storage()
+    pruned = prune_stale_locks()
+
+    elapsed = round(time.time() - t0, 3)
+
+    # Format Markdown Report
+    lines = [
+        "🧰 **[MILO SYSTEM DOCTOR // HEALTH REPORT]**",
+        f"✦ Diagnostics completed in {elapsed}s\n",
+        "──────────────────────────────────────────────────",
+        "### 🎮 Hardware & GPU Telemetry (GTX 970M)",
+        f"• VRAM Used: `{gpu['used']}` | Free: `{gpu['free']}` ({gpu['status']})",
+        f"• Core Temp: `{gpu['temp']}` | Storage Free: `{storage['free_gb']}`\n",
+        "### ⚙️ Core System Daemons",
+    ]
+
+    all_services_ok = True
+    for s in services:
+        mark = "✔" if s['ok'] else "🔴"
+        if not s['ok']:
+            all_services_ok = False
+        lines.append(f"• {mark} **{s['unit']}**: `{s['state']}` ({s['desc']})")
+
+    lines.append("\n### 🔊 PipeWire Audio & Haptics")
+    audio_mark = "✔" if audio['ok'] else "🟡"
+    mute_note = " [MUTED]" if audio['muted'] else ""
+    lines.append(f"• {audio_mark} Sonic Engine: {'Ready' if audio['pipewire'] else 'Offline'}{mute_note} | Cue FX: {'Loaded' if audio['fx_installed'] else 'Missing'}")
+
+    if pruned > 0:
+        lines.append(f"\n✔ Auto-healed: Pruned {pruned} stale lockfiles from `/tmp`")
+
+    lines.append("──────────────────────────────────────────────────")
+    if gpu['ok'] and all_services_ok and audio['ok']:
+        lines.append("✔ **ALL SYSTEMS NOMINAL. MiloOS is fully operational.**")
+    else:
+        lines.append("🟡 **Advisory:** Some services are offline. Auto-Game Mode or quiet profile may be active.")
+
+    report = "\n".join(lines)
+    print(report)
+
+    # Play cybernetic chime
+    try:
+        subprocess.run([str(Path.home() / ".local/bin/milo-sound"), "chime"], check=False)
+    except Exception:
+        pass
+
+if __name__ == "__main__":
+    run_doctor(auto_heal=True)

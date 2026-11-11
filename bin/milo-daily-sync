@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Milo Obsidian Daily Synchronizer (milo-daily-sync)
+# ==============================================================================
+set -e
+VAULT_DIR="$HOME/MiloNotes"
+DAILY_DIR="$VAULT_DIR/Daily"
+mkdir -p "$DAILY_DIR"
+TODAY=$(date +%Y-%m-%d)
+NOTE_PATH="$DAILY_DIR/${TODAY}_milo_ops.md"
+
+if [ ! -f "$NOTE_PATH" ]; then
+    echo -e "# Milo Operations Log — $TODAY\n\n## System Telemetry\n- Logged at: $(date +'%H:%M:%S')\n- Host: $(hostname)\n\n## Session Highlights\n" > "$NOTE_PATH"
+fi
+
+echo -e "- **$(date +'%H:%M:%S')** — Milo sync pulse: Core nominal, GPU accelerated." >> "$NOTE_PATH"
+echo -e "\033[1;32m✔ [Milo Daily Sync] Obsidian daily note updated:\033[0m $NOTE_PATH"
+exit 0

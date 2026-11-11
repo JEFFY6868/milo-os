@@ -1,0 +1,9 @@
+[Unit]
+Description=Milo Cognitive Core 24-Hour Nocturnal Sleep Consolidator
+Documentation=file://%h/MiloNotes/Cortex
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/milo-cortex consolidate
+StandardOutput=journal
+StandardError=journal

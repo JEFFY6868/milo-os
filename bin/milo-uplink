@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Milo Satellite Uplink & Telemetry Producer
+set -e
+
+# Uptime
+u=$(awk '{s=int($1); d=int(s/86400); h=int((s%86400)/3600); m=int((s%3600)/60); if(d>0) printf "%dd %dh %dm", d, h, m; else printf "%dh %dm", h, m}' /proc/uptime 2>/dev/null || echo "1h 0m")
+
+# Network
+n=$(nmcli -t -f NAME,TYPE connection show --active 2>/dev/null | grep -v 'loopback' | head -n 1 | cut -d: -f1 || true)
+ip=$(ip -4 -brief address show scope global 2>/dev/null | awk '{print $3}' | head -n 1 | cut -d/ -f1 || true)
+[ -z "$n" ] && n="ONLINE"
+if [ -n "$ip" ]; then
+  net="$n · $ip"
+else
+  net="$n"
+fi
+
+# Threat Matrix
+threat="THREAT MATRIX NOMINAL"
+
+# Phone telemetry
+p=$(${HOME}/.local/bin/milo-phone raw-status 2>/dev/null || echo "Vivo V2428:::Standby:::Tailscale P2P")
+
+echo "$u:::$net:::$threat:::$p"

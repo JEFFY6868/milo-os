@@ -1,0 +1,19 @@
+[Unit]
+Description=Milo Cognitive Core (Cortex) Resident LLM Daemon
+Documentation=file://%h/.local/share/milo/cortex/daemon.py
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/milo/venv/bin/python3 %h/.local/share/milo/cortex/daemon.py
+Restart=always
+RestartSec=2s
+Environment=PYTHONUNBUFFERED=1
+Environment=LLAMA_CPP_LIB=/usr/lib/libllama.so
+Environment=CORTEX_GPU_LAYERS=33
+Environment=CUDA_VISIBLE_DEVICES=0
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

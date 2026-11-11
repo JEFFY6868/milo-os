@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Milo Browser-Use Launcher Wrapper
+set -eo pipefail
+
+VENV_PY="${HOME}/.local/share/milo/venv/bin/python3"
+SCRIPT_PY="${HOME}/.local/share/milo/browser_agent.py"
+
+if [[ ! -x "$VENV_PY" ]]; then
+  echo "Error: Milo browser virtualenv not found at ${VENV_PY}" >&2
+  exit 1
+fi
+
+exec "$VENV_PY" "$SCRIPT_PY" "$@"

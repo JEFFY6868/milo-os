@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Milo Eyes — Screen Perception & Multimodal Vision Suite
+# Part of MiloOS. Built for Arch Linux & Hyprland.
+# ==============================================================================
+set -e
+
+# Load environment if present
+if [ -f "$HOME/.config/milo/eyes.env" ]; then
+  # shellcheck source=/dev/null
+  set -a
+  source "$HOME/.config/milo/eyes.env"
+  set +a
+elif [ -f "$HOME/.config/milo/browser.env" ]; then
+  set -a
+  source "$HOME/.config/milo/browser.env"
+  set +a
+fi
+
+export PYTHONUNBUFFERED=1
+exec python3 ${HOME}/.local/share/milo/eyes/cli.py "$@"

@@ -1,0 +1,252 @@
+#!/usr/bin/env python3
+"""
+Milo Task & Scratchpad CLI
+Seamless terminal, voice, and GUI bridge for ~/.config/omarchy/todos.json
+Part of MiloOS. Built for Arch Linux & Hyprland.
+"""
+
+import os
+import sys
+import json
+import time
+from pathlib import Path
+from typing import List, Dict, Any, Optional
+
+TODOS_PATH = Path.home() / ".config" / "omarchy" / "todos.json"
+TRIGGER_PATH = Path("/tmp/milo-scratchpad-trigger")
+
+
+def load_todos() -> List[Dict[str, Any]]:
+    if not TODOS_PATH.exists():
+        return []
+    try:
+        data = json.loads(TODOS_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def save_todos(todos: List[Dict[str, Any]]) -> None:
+    TODOS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    TODOS_PATH.write_text(json.dumps(todos, indent=2) + "\n", encoding="utf-8")
+    # Touch trigger so QML FileView reloads immediately if not auto-detected
+    notify_gui("update")
+
+
+def notify_gui(action: str = "toggle") -> None:
+    try:
+        TRIGGER_PATH.write_text(f"{int(time.time()*1000)} {action}\n")
+    except Exception:
+        pass
+
+    import subprocess
+    cmd = []
+    if action == "toggle":
+        cmd = ["omarchy-shell", "milo", "toggleScratchpad"]
+    elif action == "open":
+        cmd = ["omarchy-shell", "milo", "openScratchpad"]
+    elif action == "close":
+        cmd = ["omarchy-shell", "milo", "closeScratchpad"]
+    if cmd:
+        try:
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+
+def add_task(text: str) -> Dict[str, Any]:
+    text = text.strip()
+    if not text:
+        sys.stderr.write("Error: Task description cannot be empty.\n")
+        sys.exit(1)
+    todos = load_todos()
+    item = {
+        "id": int(time.time() * 1000),
+        "text": text,
+        "done": False,
+        "created_at": time.strftime("%I:%M %p")
+    }
+    todos.append(item)
+    save_todos(todos)
+    return item
+
+
+def toggle_task(target: str) -> Optional[Dict[str, Any]]:
+    todos = load_todos()
+    target = target.strip()
+    # Check by 1-based index or id
+    updated_item = None
+    try:
+        idx = int(target)
+        if 1 <= idx <= len(todos):
+            todos[idx - 1]["done"] = not todos[idx - 1]["done"]
+            updated_item = todos[idx - 1]
+    except ValueError:
+        pass
+
+    if not updated_item:
+        for item in todos:
+            if str(item.get("id")) == target:
+                item["done"] = not item.get("done", False)
+                updated_item = item
+                break
+
+    if updated_item:
+        save_todos(todos)
+        return updated_item
+    return None
+
+
+def delete_task(target: str) -> bool:
+    todos = load_todos()
+    target = target.strip()
+    new_todos = []
+    removed = False
+
+    try:
+        idx = int(target)
+        if 1 <= idx <= len(todos):
+            todos.pop(idx - 1)
+            save_todos(todos)
+            return True
+    except ValueError:
+        pass
+
+    for item in todos:
+        if str(item.get("id")) == target:
+            removed = True
+        else:
+            new_todos.append(item)
+
+    if removed:
+        save_todos(new_todos)
+        return True
+    return False
+
+
+def clear_completed() -> int:
+    todos = load_todos()
+    initial_count = len(todos)
+    todos = [t for t in todos if not t.get("done", False)]
+    save_todos(todos)
+    return initial_count - len(todos)
+
+
+def print_tasks(filter_mode: str = "all", json_output: bool = False) -> None:
+    todos = load_todos()
+    if filter_mode == "pending":
+        todos = [t for t in todos if not t.get("done", False)]
+    elif filter_mode == "done":
+        todos = [t for t in todos if t.get("done", False)]
+
+    if json_output:
+        print(json.dumps(todos, indent=2))
+        return
+
+    total = len(load_todos())
+    done_count = len([t for t in load_todos() if t.get("done", False)])
+    pending_count = total - done_count
+
+    print(f"\033[1;31m✦ MILO SCRATCHPAD\033[0m // \033[36m{done_count}/{total} Completed\033[0m (\033[33m{pending_count} Pending\033[0m)")
+    print("\033[90m" + "─" * 60 + "\033[0m")
+
+    if not todos:
+        print("\033[90m  No tasks found for this view.\033[0m")
+        return
+
+    for i, item in enumerate(todos, 1):
+        is_done = item.get("done", False)
+        box = "\033[1;32m[✓]\033[0m" if is_done else "\033[1;31m[ ]\033[0m"
+        text = f"\033[90m\033[9m{item['text']}\033[0m" if is_done else f"\033[1;37m{item['text']}\033[0m"
+        created = f"\033[90m({item.get('created_at', '')})\033[0m" if item.get('created_at') else ""
+        print(f" {box} \033[1;33m{i:2d}.\033[0m {text} {created}")
+
+    print("\033[90m" + "─" * 60 + "\033[0m")
+
+
+def summarize_with_milo() -> None:
+    todos = load_todos()
+    if not todos:
+        msg = "Your Milo Scratchpad is currently empty. No active missions logged."
+        print(f"\n\033[1;36m[👑 Milo]:\033[0m {msg}\n")
+        return
+
+    total = len(todos)
+    done = [t['text'] for t in todos if t.get('done', False)]
+    pending = [t['text'] for t in todos if not t.get('done', False)]
+
+    summary = f"You have {total} total tactical tasks logged.\n"
+    if done:
+        summary += f"✔ Completed ({len(done)}): {', '.join(done)}.\n"
+    if pending:
+        summary += f"⏳ Pending ({len(pending)}): {', '.join(pending)}.\n"
+    summary += "Ready when you are, Jeffy."
+
+    print(f"\n\033[1;31m✦ MILO TACTICAL BRIEFING\033[0m")
+    print(f"\033[1;36m[👑 Milo]:\033[0m {summary}\n")
+
+    # Speak via voice daemon
+    speak_bin = Path.home() / ".local" / "bin" / "milo-speak"
+    if speak_bin.exists():
+        import subprocess
+        subprocess.Popen([str(speak_bin), summary], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def main():
+    args = sys.argv[1:]
+    if not args or args[0] in ("gui", "toggle", "open"):
+        notify_gui("toggle")
+        sys.exit(0)
+
+    cmd = args[0].lower()
+
+    if cmd in ("list", "ls", "status"):
+        filter_mode = "all"
+        json_mode = "--json" in args
+        if "--pending" in args or "-p" in args:
+            filter_mode = "pending"
+        elif "--done" in args or "-d" in args or "--completed" in args:
+            filter_mode = "done"
+        print_tasks(filter_mode=filter_mode, json_output=json_mode)
+
+    elif cmd in ("add", "new", "+"):
+        task_str = " ".join(args[1:])
+        item = add_task(task_str)
+        print(f"\033[1;32m✔ Added task:\033[0m {item['text']}")
+
+    elif cmd in ("done", "toggle", "check", "x"):
+        if len(args) < 2:
+            print("Usage: milo task done <index|id>")
+            sys.exit(1)
+        item = toggle_task(args[1])
+        if item:
+            status = "\033[1;32mcompleted\033[0m" if item.get("done") else "\033[1;33mpending\033[0m"
+            print(f"✔ Task marked {status}: {item['text']}")
+        else:
+            print("Task not found.")
+
+    elif cmd in ("rm", "delete", "remove", "-"):
+        if len(args) < 2:
+            print("Usage: milo task rm <index|id>")
+            sys.exit(1)
+        if delete_task(args[1]):
+            print("✔ Task removed.")
+        else:
+            print("Task not found.")
+
+    elif cmd in ("clear", "clean"):
+        count = clear_completed()
+        print(f"✔ Cleared {count} completed task(s).")
+
+    elif cmd in ("summary", "summarize", "brief"):
+        summarize_with_milo()
+
+    else:
+        # Default: if user types `milo task buy groceries`, treat as add
+        task_str = " ".join(args)
+        item = add_task(task_str)
+        print(f"\033[1;32m✔ Added task:\033[0m {item['text']}")
+
+
+if __name__ == "__main__":
+    main()

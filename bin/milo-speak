@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""
+Milo Speech Dispatcher (milo-speak)
+Communicates with the resident milo-voice-daemon to speak text or control playback.
+"""
+
+import sys
+import os
+import json
+import socket
+import argparse
+import subprocess
+from pathlib import Path
+
+CONFIG_PATH = Path.home() / ".config" / "milo" / "voice.json"
+
+def get_socket_path() -> Path:
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime_dir and Path(runtime_dir).exists():
+        return Path(runtime_dir) / "milo-voice.sock"
+    return Path(f"/tmp/milo-voice-{os.getuid()}.sock")
+
+def is_voice_enabled() -> bool:
+    if not CONFIG_PATH.exists():
+        return True
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return bool(data.get("enabled", True))
+    except Exception:
+        return True
+
+def send_daemon_request(req: dict, timeout: float = 30.0) -> dict:
+    sock_path = get_socket_path()
+    if not sock_path.exists():
+        return {"status": "error", "error": "Daemon socket not found"}
+    
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    try:
+        s.connect(str(sock_path))
+        s.sendall(json.dumps(req).encode("utf-8") + b"\n")
+        raw = s.recv(16384)
+        if raw:
+            return json.loads(raw.decode("utf-8"))
+        return {"status": "error", "error": "Empty response"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+    finally:
+        s.close()
+
+def ensure_daemon_running():
+    sock_path = get_socket_path()
+    res = send_daemon_request({"action": "ping"}, timeout=1.0)
+    if res.get("status") == "pong":
+        return True
+
+    # Attempt to start daemon
+    daemon_manager = Path.home() / ".local" / "bin" / "milo-voice-daemon"
+    if daemon_manager.exists():
+        subprocess.run([str(daemon_manager), "start"], check=False)
+        # Check again
+        res = send_daemon_request({"action": "ping"}, timeout=2.0)
+        return res.get("status") == "pong"
+    return False
+
+def stop_playback():
+    """Interrupts active speech immediately."""
+    # 1. Ask daemon to terminate playback
+    send_daemon_request({"action": "stop"}, timeout=1.5)
+    
+    # 2. Kill any stray pw-play playing milo audio
+    subprocess.run(["pkill", "-f", "pw-play /tmp/milo-speech"], check=False, stderr=subprocess.DEVNULL)
+
+def main():
+    parser = argparse.ArgumentParser(description="Milo Speech CLI")
+    parser.add_argument("text", nargs="*", help="Text to speak")
+    parser.add_argument("--stop", action="store_true", help="Stop any current speech")
+    parser.add_argument("--voice", type=str, default=None, help="Voice identifier (e.g. bm_fable,am_adam)")
+    parser.add_argument("--speed", type=float, default=None, help="Speech speed (e.g. 1.0)")
+    parser.add_argument("--force", action="store_true", help="Speak even if voice is disabled in config")
+    parser.add_argument("--status", action="store_true", help="Check voice daemon status")
+    
+    args = parser.parse_args()
+
+    if args.stop:
+        stop_playback()
+        print("Milo speech stopped.")
+        return 0
+
+    if args.status:
+        res = send_daemon_request({"action": "status"}, timeout=2.0)
+        print(json.dumps(res, indent=2))
+        return 0
+
+    input_text = " ".join(args.text).strip()
+    if not input_text and not sys.stdin.isatty():
+        input_text = sys.stdin.read().strip()
+
+    if not input_text:
+        return 0
+
+    # Respect voice enabled configuration unless --force
+    if not args.force and not is_voice_enabled():
+        return 0
+
+    # Ensure daemon is online
+    if not ensure_daemon_running():
+        print("Error: Could not connect to Milo Voice Daemon.", file=sys.stderr)
+        return 1
+
+    req = {
+        "action": "speak",
+        "text": input_text
+    }
+    if args.voice:
+        req["voice"] = args.voice
+    if args.speed:
+        req["speed"] = args.speed
+
+    res = send_daemon_request(req, timeout=45.0)
+    if res.get("status") == "ok":
+        return 0
+    else:
+        print(f"Speech failed: {res.get('error')}", file=sys.stderr)
+        return 1
+
+if __name__ == "__main__":
+    sys.exit(main() or 0)

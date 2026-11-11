@@ -1,0 +1,16 @@
+[Unit]
+Description=Milo Kino Cinema Studio & Live Voice Service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/usr/local/share/milo/kino/studio
+ExecStart=%h/.local/share/milo/venv/bin/python3 /usr/local/share/milo/kino/studio/server.py
+Restart=on-failure
+RestartSec=3
+Environment=PATH=%h/.local/share/milo/venv/bin:/usr/local/bin:/usr/bin
+Environment=WAYLAND_DISPLAY=wayland-1
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+
+[Install]
+WantedBy=default.target

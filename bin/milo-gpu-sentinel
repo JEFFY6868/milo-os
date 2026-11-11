@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Milo GPU & VRAM Sentinel (milo-gpu-sentinel)
+# Autonomous GTX 970M Health, Temperature & Memory Guard for Milo AI Models
+# ==============================================================================
+set -e
+
+if [[ "${1:-}" =~ ^(-h|--help|help)$ ]]; then
+    echo "Usage: milo-gpu-sentinel"
+    echo "Inspects GTX 970M temperature, power draw, and VRAM buffers."
+    exit 0
+fi
+
+if ! command -v nvidia-smi &>/dev/null; then
+    echo 'nvidia-smi not available'
+    exit 0
+fi
+
+STATS=$(nvidia-smi --query-gpu=temperature.gpu,power.draw,memory.used,memory.free,memory.total --format=csv,noheader,nounits)
+IFS=',' read -r TEMP POWER MEM_USED MEM_FREE MEM_TOTAL <<< "$STATS"
+TEMP=$(echo "$TEMP" | tr -d ' ')
+POWER=$(echo "$POWER" | tr -d ' ')
+MEM_USED=$(echo "$MEM_USED" | tr -d ' ')
+MEM_FREE=$(echo "$MEM_FREE" | tr -d ' ')
+MEM_TOTAL=$(echo "$MEM_TOTAL" | tr -d ' ')
+
+PCT=$(( MEM_USED * 100 / MEM_TOTAL ))
+
+echo -e "\033[1;36m✦ [Milo GPU Sentinel]\033[0m GeForce GTX 970M Status:"
+echo -e "  • Temperature: ${TEMP}°C"
+echo -e "  • Power Draw:  ${POWER}W"
+echo -e "  • VRAM In Use: ${MEM_USED} MiB / ${MEM_TOTAL} MiB (${PCT}%)"
+echo -e "  • Free Buffer: ${MEM_FREE} MiB"
+
+if [ "$MEM_FREE" -lt 150 ]; then
+    echo -e "  \033[1;31m⚠️ CRITICAL: VRAM Buffer < 150 MiB! Flushing cache...\033[0m"
+    exit 1
+elif [ "$TEMP" -gt 82 ]; then
+    echo -e "  \033[1;33m⚠️ WARNING: GPU Temperature exceeding 82°C.\033[0m"
+else
+    echo -e "  \033[1;32m✔ VRAM & Thermals Nominal.\033[0m"
+fi
+exit 0

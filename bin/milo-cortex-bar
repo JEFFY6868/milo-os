@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""
+Milo Cortex Bar Widget — Live Status Indicator & Controller
+Part of MiloOS. Built for Omarchy Bar, Waybar & Hyprland.
+
+Outputs JSON formatted for Waybar / Quickshell / Omarchy modules.
+Controls:
+  - Left click: Toggle Milo Cortex Floating HUD (SUPER+ALT+C)
+  - Right click: Toggle Hybrid Intelligence Mode (Auto -> Online -> Offline)
+"""
+
+import sys
+import os
+import json
+import subprocess
+from pathlib import Path
+
+sys.path.insert(0, str(Path.home() / ".local/share/milo/cortex"))
+from db import get_db_connection
+from intelligence_router import get_status, toggle_mode, set_mode
+
+def get_mastered_stats():
+    """Get count of mastered vs learning topics from cortex.db."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM topics WHERE is_mastered = TRUE")
+        mastered = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM topics WHERE is_mastered = FALSE")
+        learning = cur.fetchone()[0]
+        conn.close()
+        return mastered, learning
+    except Exception:
+        return 0, 0
+
+def notify(title: str, message: str, icon: str = "dialog-information"):
+    try:
+        subprocess.run(["notify-send", "-a", "Milo Cortex", "-i", icon, title, message], check=False)
+    except Exception:
+        pass
+
+def main():
+    if len(sys.argv) > 1:
+        arg = sys.argv[1].lower()
+        if arg in ("--toggle", "-t"):
+            new_mode = toggle_mode()
+            stat = get_status()
+            notify("🧠 Milo Intelligence Mode", f"Switched to {stat['label']}\n{stat['description']}", "preferences-system")
+            print(f"Switched mode to: {new_mode}")
+            return
+        elif arg in ("--hud", "-h"):
+            subprocess.Popen([str(Path.home() / ".local/bin/milo-cortex-hud")])
+            return
+        elif arg in ("--status", "-s"):
+            print(json.dumps(get_status(), indent=2))
+            return
+
+    # Default: Output Waybar / Omarchy Bar JSON
+    stat = get_status()
+    mastered, learning = get_mastered_stats()
+
+    mode = stat["mode"]
+    online = stat["is_online"]
+
+    if mode == "offline":
+        icon = "⚡ Offline"
+        css_class = "offline"
+    elif mode == "online":
+        icon = "🌐 Cloud" if online else "❌ Disconnected"
+        css_class = "online" if online else "critical"
+    else:  # auto
+        icon = "🔄 Cloud" if online else "🔄 Offline"
+        css_class = "auto-online" if online else "auto-offline"
+
+    bar_text = f"🧠 {mastered}M·{learning}L | {icon}"
+
+    tooltip_lines = [
+        "🧠 MILO COGNITIVE CORTEX & HYBRID CORE",
+        f"Mode:          {stat['label']}",
+        f"Backend:       {stat['description']}",
+        f"Daemon RAM:    {'Warm & Active (AVX2)' if stat['daemon_warm'] else 'Inactive'}",
+        f"Topics:        {mastered} Mastered, {learning} Learning",
+        "────────────────────────────────────",
+        "Left-Click:    Toggle Milo Cortex HUD",
+        "Right-Click:   Toggle Online / Offline / Auto"
+    ]
+
+    output = {
+        "text": bar_text,
+        "tooltip": "\n".join(tooltip_lines),
+        "class": css_class,
+        "alt": mode
+    }
+
+    print(json.dumps(output))
+
+if __name__ == "__main__":
+    main()

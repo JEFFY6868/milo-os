@@ -1,0 +1,19 @@
+[Unit]
+Description=Milo Resident Voice Daemon (Kokoro-82M TTS)
+Documentation=file://%h/.local/share/milo/voice/daemon.py
+After=default.target sound.target pipewire.service
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/milo/kokoro-env/bin/python %h/.local/share/milo/voice/daemon.py
+Restart=always
+RestartSec=2s
+Environment=PYTHONUNBUFFERED=1
+Environment=HF_HUB_OFFLINE=1
+Environment=TRANSFORMERS_OFFLINE=1
+Environment=CUDA_VISIBLE_DEVICES=0
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

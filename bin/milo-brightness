@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# milo-brightness: Adjusts brightness (10-100%) and displays ASCII bar
+# Author: Milo
+# Target: Arch Linux / Hyprland
+
+set -euo pipefail
+
+BRIGHTNESS_FILE="/sys/class/backlight/intel_backlight/brightness"
+MAX_BRIGHTNESS_FILE="/sys/class/backlight/intel_backlight/max_brightness"
+
+# Fallback logic if specific backlight path differs
+if [[ ! -f "$BRIGHTNESS_FILE" ]]; then
+    BACKLIGHT_DIR=$(ls -d /sys/class/backlight/*/ 2>/dev/null | head -n 1)
+    if [[ -z "$BACKLIGHT_DIR" ]]; then
+        echo "Error: No backlight device found." >&2
+        exit 1
+    fi
+    BRIGHTNESS_FILE="${BACKLIGHT_DIR}brightness"
+    MAX_BRIGHTNESS_FILE="${BACKLIGHT_DIR}max_brightness"
+fi
+
+usage() {
+    echo "Usage: milo-brightness [-h|--help] [percentage]"
+    echo ""
+    echo "Adjusts screen brightness between 10% and 100% and displays an ASCII bar."
+    echo ""
+    echo "Options:"
+    echo "  -h, --help      Show this help message and exit."
+    echo "  <percentage>    Target brightness (10-100). If omitted, only displays current status."
+    exit 0
+}
+
+# Handle Help Flag
+if [[ "$#" -gt 0 && ("$1" == "-h" || "$1" == "--help") ]]; then
+    usage
+fi
+
+# Read Max Brightness
+MAX_BRIGHTNESS=$(cat "$MAX_BRIGHTNESS_FILE")
+
+# Determine Target Brightness
+if [[ "$#" -gt 0 ]]; then
+    TARGET_PCT="$1"
+    
+    # Validate Input
+    if ! [[ "$TARGET_PCT" =~ ^[0-9]+$ ]]; then
+        echo "Error: Brightness must be a number." >&2
+        exit 1
+    fi
+
+    # Clamp to 10-100
+    if [[ "$TARGET_PCT" -lt 10 ]]; then
+        TARGET_PCT=10
+        echo "Note: Clamped to minimum 10%."
+    elif [[ "$TARGET_PCT" -gt 100 ]]; then
+        TARGET_PCT=100

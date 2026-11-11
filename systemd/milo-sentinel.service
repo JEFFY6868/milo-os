@@ -1,0 +1,16 @@
+[Unit]
+Description=Milo Sentinel Autonomous Hardware & VRAM Governor
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/milo-sentinel start
+Restart=always
+RestartSec=5
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=graphical-session.target

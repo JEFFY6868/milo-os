@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Milo Cybernetic Audio FX Player
+# Ultra-low-latency PipeWire / PulseAudio sonic feedback for MiloOS.
+# ==============================================================================
+set -euo pipefail
+
+SOUND_DIR="$HOME/.local/share/milo/sound/fx"
+MUTE_FILE="$HOME/.config/milo/muted"
+
+# Check mute state
+if [[ -f "$MUTE_FILE" ]]; then
+    exit 0
+fi
+
+# Pick sound name
+SOUND_NAME="${1:-chime}"
+if [[ "$SOUND_NAME" == "play" ]]; then
+    SOUND_NAME="${2:-chime}"
+fi
+
+case "$SOUND_NAME" in
+    --help|-h|help)
+        echo "Usage: milo-sound {chime|chirp|sweep|shield|alert|mute|unmute|test}"
+        exit 0
+        ;;
+    chime|chirp|sweep|shield|alert)
+        WAV_FILE="$SOUND_DIR/${SOUND_NAME}.wav"
+        ;;
+    mute)
+        mkdir -p "$HOME/.config/milo"
+        touch "$MUTE_FILE"
+        echo "✦ Milo sound muted."
+        exit 0
+        ;;
+    unmute)
+        rm -f "$MUTE_FILE"
+        echo "✦ Milo sound unmuted."
+        "$0" chime
+        exit 0
+        ;;
+    test)
+        echo "✦ Playing sound palette test..."
+        for s in chirp chime sweep shield alert; do
+            echo "  ▶ Playing $s..."
+            "$0" "$s"
+            sleep 0.5
+        done
+        exit 0
+        ;;
+    *)
+        WAV_FILE="$SOUND_DIR/${SOUND_NAME}.wav"
+        if [[ ! -f "$WAV_FILE" ]]; then
+            echo "Unknown sound: $SOUND_NAME (Available: chirp, chime, sweep, shield, alert, mute, unmute, test)" >&2
+            exit 1
+        fi
+        ;;
+esac
+
+if [[ -f "$WAV_FILE" ]]; then
+    if command -v pw-play >/dev/null 2>&1; then
+        pw-play "$WAV_FILE" >/dev/null 2>&1 &
+    elif command -v paplay >/dev/null 2>&1; then
+        paplay "$WAV_FILE" >/dev/null 2>&1 &
+    elif command -v aplay >/dev/null 2>&1; then
+        aplay -q "$WAV_FILE" >/dev/null 2>&1 &
+    fi
+fi

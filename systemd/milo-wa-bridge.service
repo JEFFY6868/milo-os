@@ -1,0 +1,16 @@
+[Unit]
+Description=Milo WhatsApp Bidirectional AI Bridge Daemon
+After=network.target milo-openwa.service
+Wants=milo-openwa.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/milo
+ExecStart=%h/.local/share/milo/venv/bin/python3 %h/.local/share/milo/wa_bridge.py
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=%h/.local/share/milo/venv/bin:%h/.local/bin:/usr/local/bin:/usr/bin
+
+[Install]
+WantedBy=default.target

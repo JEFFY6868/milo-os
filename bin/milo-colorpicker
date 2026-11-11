@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# MiloOS Screen Color Picker (Hyprpicker)
+set -eo pipefail
+
+COLOR=$(hyprpicker -a -f hex 2>/dev/null || true)
+
+if [[ -n "$COLOR" ]]; then
+  printf "%s" "$COLOR" | wl-copy
+  notify-send -a "MiloOS" -i "color-picker" "Color Picked" "Copied $COLOR to clipboard!"
+fi

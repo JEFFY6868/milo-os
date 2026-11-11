@@ -1,0 +1,13 @@
+[Unit]
+Description=Milo OS Local HTTP API Bridge
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/.local/share/milo/milo_http_bridge.py
+Restart=always
+RestartSec=2s
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

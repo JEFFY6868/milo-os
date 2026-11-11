@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# ==============================================================================
+# milo-test: Aider QA & Forensic Debugger ($0 Cost)
+# Connects to NVIDIA DGX Cloud (Mistral Large) or Groq / Gemini
+# Universal Polyglot Support for MiloOS (Arch Linux & Hyprland)
+# ==============================================================================
+
+source ${HOME}/.config/milo/keys.env
+
+for arg in "$@"; do
+    if [ "$arg" = "--help" ] || [ "$arg" = "-h" ]; then
+        echo "Usage: milo-test [files...] [aider options...]"
+        exit 0
+    fi
+done
+
+GIT_FLAG=""
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    GIT_FLAG="--no-git"
+fi
+
+if [ -n "$NVIDIA_API_KEY" ]; then
+    export OPENAI_API_BASE="https://integrate.api.nvidia.com/v1"
+    export OPENAI_API_KEY="$NVIDIA_API_KEY"
+    MODEL="openai/mistralai/mistral-large-4-1t-a52b"
+elif [ -n "$GROQ_API_KEY" ]; then
+    export GROQ_API_KEY="$GROQ_API_KEY"
+    MODEL="groq/llama-3.1-8b-instant"
+elif [ -n "$GEMINI_API_KEY" ]; then
+    export GEMINI_API_KEY="$GEMINI_API_KEY"
+    MODEL="gemini/gemini-2.0-flash"
+else
+    # Fallback to local OmniRoute
+    export OPENAI_API_BASE="http://127.0.0.1:20128/v1"
+    export OPENAI_API_KEY="${OPENAI_API_KEY:-local-proxy-token}"
+    MODEL="openai/claude-3-5-sonnet"
+fi
+
+HAS_MODEL=0
+for arg in "$@"; do
+    if [ "$arg" = "--model" ]; then
+        HAS_MODEL=1
+        break
+    fi
+done
+
+if [ $HAS_MODEL -eq 1 ]; then
+    exec ${HOME}/.local/bin/aider \
+        --no-show-model-warnings \
+        $GIT_FLAG "$@"
+else
+    exec ${HOME}/.local/bin/aider \
+        --model "$MODEL" \
+        --no-show-model-warnings \
+        $GIT_FLAG "$@"
+fi

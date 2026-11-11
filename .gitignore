@@ -1,0 +1,64 @@
+# ==========================================
+# MiloOS Public Repository Git Ignore Rules
+# Strictly enforces zero credential / state leaks
+# ==========================================
+
+# 1. API Keys & Sensitive Secrets (NEVER COMMIT)
+*.env
+!*.env.example
+*.keystore
+*.key
+*.pem
+*.token
+*.cert
+*.pfx
+
+# 2. Ephemeral State, Databases & Telemetry
+*.db
+*.sqlite
+*.sqlite3
+*.log
+*.pid
+*.sock
+*.state
+*.tmp
+*.stat
+
+# 3. User Captures & Personal Media
+screenshots/
+notes/
+trajectories/
+whatsapp_qr.png
+current_wallpaper.txt
+soundtrack.m3u
+*.jpg
+*.jpeg
+*.png
+*.mp4
+*.webm
+
+# 4. WhatsApp Web Auth Cache
+.wwebjs_auth/
+.wwebjs_cache/
+
+# 5. Python Environments & Caches
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+*-env/
+.venv/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# 6. Backups & Temporary Artifacts
+*.bak
+*.bak.*
+*~
+.#*
+*.swp
+*.swo

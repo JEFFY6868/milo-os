@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+# Milo Master Command Dispatcher
+set -e
+
+CMD="${1:-}"
+
+case "$CMD" in
+  help|--help|-h|"")
+    shift 2>/dev/null || true
+    exec ${HOME}/.local/bin/milo-help "$@"
+    ;;
+  doctor|health|diagnose)
+    shift
+    exec ${HOME}/.local/bin/milo-doctor "$@"
+    ;;
+  audit)
+    shift
+    exec ${HOME}/.local/bin/milo-evolve audit "$@"
+    ;;
+  sound)
+    shift
+    exec ${HOME}/.local/bin/milo-sound "$@"
+    ;;
+  ocr)
+    shift
+    exec ${HOME}/.local/bin/milo-ocr "$@"
+    ;;
+  talk|"talk"|voice-on)
+    ${HOME}/.local/bin/milo-speak --force "Voice enabled, sir. I am standing by." >/dev/null 2>&1 &
+    python3 -c "
+import json
+from pathlib import Path
+p = Path.home() / '.config' / 'milo' / 'voice.json'
+data = {'enabled': True, 'voice': 'bm_fable,am_adam', 'speed': 1.0, 'lang_code': 'b'}
+if p.exists():
+    try: data.update(json.loads(p.read_text()))
+    except: pass
+data['enabled'] = True
+p.write_text(json.dumps(data, indent=2))
+"
+    echo -e "\033[32m✔ Milo voice enabled.\033[0m Model: Kokoro-82M | Voice: bm_fable,am_adam"
+    ;;
+  quiet|"quiet"|voice-off|mute)
+    ${HOME}/.local/bin/milo-speak --stop >/dev/null 2>&1 || true
+    python3 -c "
+import json
+from pathlib import Path
+p = Path.home() / '.config' / 'milo' / 'voice.json'
+data = {'enabled': False, 'voice': 'bm_fable,am_adam', 'speed': 1.0, 'lang_code': 'b'}
+if p.exists():
+    try: data.update(json.loads(p.read_text()))
+    except: pass
+data['enabled'] = False
+p.write_text(json.dumps(data, indent=2))
+"
+    echo -e "\033[33m✔ Milo voice muted. Silent mode active.\033[0m"
+    ;;
+  stop)
+    if [[ "${2:-}" == "talking" ]]; then
+      shift 2
+      exec "$0" quiet
+    else
+      ${HOME}/.local/bin/milo-speak --stop
+    fi
+    ;;
+  shut)
+    if [[ "${2:-}" == "up" ]]; then
+      shift 2
+      ${HOME}/.local/bin/milo-speak --stop
+    else
+      exec ${HOME}/.local/bin/milo-core "$@"
+    fi
+    ;;
+  shutup|silence)
+    ${HOME}/.local/bin/milo-speak --stop
+    ;;
+  speak|say)
+    shift
+    exec ${HOME}/.local/bin/milo-speak "$@"
+    ;;
+  game|game-mode|gaming)
+    shift
+    exec ${HOME}/.local/bin/milo-game "$@"
+    ;;
+  task|tasks|todo|todos|scratchpad)
+    shift
+    exec ${HOME}/.local/bin/milo-task "$@"
+    ;;
+  banter|proactive)
+    shift
+    exec ${HOME}/.local/bin/milo-banter "$@"
+    ;;
+  look|see|camera|cam|webcam)
+    shift
+    exec ${HOME}/.local/bin/milo-look "$@"
+    ;;
+  voice)
+    shift
+    SUB="${1:-status}"
+    case "$SUB" in
+      on|start|enable)
+        exec "$0" talk
+        ;;
+      off|stop|disable)
+        exec "$0" quiet
+        ;;
+      daemon)
+        shift
+        exec ${HOME}/.local/bin/milo-voice-daemon "$@"
+        ;;
+      status|*)
+        ${HOME}/.local/bin/milo-voice-daemon status
+        ;;
+    esac
+    ;;
+  do)
+    shift
+    exec ${HOME}/.local/bin/milo-do "$@"
+    ;;
+  phone)
+    shift
+    exec ${HOME}/.local/bin/milo-phone "$@"
+    ;;
+  wa)
+    shift
+    exec ${HOME}/.local/bin/milo-wa "$@"
+    ;;
+  call)
+    shift
+    exec ${HOME}/.local/bin/milo-call "$@"
+    ;;
+  music)
+    shift
+    exec ${HOME}/.local/bin/milo-music "$@"
+    ;;
+  files)
+    shift
+    exec ${HOME}/.local/bin/milo-files "$@"
+    ;;
+  torrent)
+    shift
+    exec ${HOME}/.local/bin/milo-torrent "$@"
+    ;;
+  cua|desktop)
+    shift
+    exec ${HOME}/.local/bin/milo-cua "$@"
+    ;;
+  dispatch)
+    shift
+    exec ${HOME}/.local/bin/milo-dispatch "$@"
+    ;;
+  ask|query)
+    shift
+    exec ${HOME}/.local/bin/milo-query "$@"
+    ;;
+  *)
+    exec ${HOME}/.local/bin/milo-core "$@"
+    ;;
+esac

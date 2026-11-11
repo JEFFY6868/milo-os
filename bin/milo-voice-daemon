@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Milo Voice Daemon Manager — Resident Kokoro-82M TTS Supervisor
+# Part of MiloOS. Built for Arch Linux & Hyprland.
+# ==============================================================================
+set -e
+
+get_socket_path() {
+    if [ -n "$XDG_RUNTIME_DIR" ] && [ -d "$XDG_RUNTIME_DIR" ]; then
+        echo "$XDG_RUNTIME_DIR/milo-voice.sock"
+    else
+        echo "/tmp/milo-voice-$(id -u).sock"
+    fi
+}
+
+SOCKET_PATH=$(get_socket_path)
+SERVICE_NAME="milo-voice.service"
+DAEMON_SCRIPT="${HOME}/.local/share/milo/voice/daemon.py"
+PYTHON_BIN="${HOME}/.local/share/milo/kokoro-env/bin/python"
+PID_FILE="/tmp/milo-voice-$(id -u).pid"
+LOG_FILE="${HOME}/.local/share/milo/voice/daemon.log"
+
+cmd="${1:-status}"
+
+is_socket_alive() {
+    local sock
+    sock=$(get_socket_path)
+    if [ -S "$sock" ]; then
+        python3 -c "
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(1.5)
+success = False
+try:
+    s.connect('$sock')
+    s.sendall(json.dumps({'action': 'ping'}).encode() + b'\n')
+    data = json.loads(s.recv(1024).decode())
+    if data.get('status') == 'pong':
+        success = True
+except Exception:
+    pass
+finally:
+    s.close()
+sys.exit(0 if success else 1)
+" 2>/dev/null
+        return $?
+    fi
+    return 1
+}
+
+case "$cmd" in
+    --help|-h|help)
+        echo "Usage: milo-voice-daemon {start|stop|restart|status|ping|logs}"
+        exit 0
+        ;;
+    start)
+        if is_socket_alive; then
+            echo -e "\033[32m✔ Milo Voice Daemon is already running and warm!\033[0m"
+            exit 0
+        fi
+
+        echo "🚀 Starting Milo Voice Resident Daemon (Kokoro-82M)..."
+        # 1. Try systemd if user bus is connected
+        if systemctl --user is-system-running &>/dev/null; then
+            systemctl --user daemon-reload 2>/dev/null || true
+            systemctl --user start "$SERVICE_NAME" 2>/dev/null || true
+            sleep 1
+        fi
+
+        # 2. If socket is still not up, start directly via background process
+        if ! is_socket_alive; then
+            echo "⚡ Launching daemon in background process mode..."
+            nohup "$PYTHON_BIN" "$DAEMON_SCRIPT" > "$LOG_FILE" 2>&1 &
+            # Kokoro model load takes a few seconds to warm up
+            for i in {1..30}; do
+                if is_socket_alive; then
+                    break
+                fi
+                sleep 1
+            done
+        fi
+
+        if is_socket_alive; then
+            echo -e "\033[32m✔ Milo Voice Daemon online and responsive.\033[0m"
+        else
+            echo -e "\033[31m✘ Failed to start Milo Voice Daemon. Check $LOG_FILE\033[0m"
+            exit 1
+        fi
+        ;;
+
+    stop)
+        echo "🛑 Stopping Milo Voice Daemon..."
+        if systemctl --user is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+            systemctl --user stop "$SERVICE_NAME" 2>/dev/null || true
+        fi
+
+        if [ -f "$PID_FILE" ]; then
+            pid=$(cat "$PID_FILE" 2>/dev/null || true)
+            if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+                kill "$pid" 2>/dev/null || true
+            fi
+            rm -f "$PID_FILE"
+        fi
+
+        # Kill any orphaned daemon processes
+        pkill -f "${HOME}/.local/share/milo/voice/daemon.py" 2>/dev/null || true
+
+        # Clean socket
+        sock=$(get_socket_path)
+        rm -f "$sock"
+
+        echo -e "\033[33m✔ Milo Voice Daemon stopped.\033[0m"
+        ;;
+
+    restart)
+        "$0" stop
+        sleep 1
+        "$0" start
+        ;;
+
+    status)
+        if is_socket_alive; then
+            echo -e "\033[32m● Milo Voice Daemon: RUNNING (Socket: $SOCKET_PATH)\033[0m"
+            python3 -c "
+import socket, json
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(2.0)
+try:
+    s.connect('$(get_socket_path)')
+    s.sendall(json.dumps({'action': 'status'}).encode() + b'\n')
+    res = json.loads(s.recv(4096).decode())
+    print(f\"  • Voice: {res.get('voice')}\")
+    print(f\"  • Enabled: {res.get('enabled')}\")
+    print(f\"  • Speaking now: {res.get('speaking')}\")
+    print(f\"  • Speed: {res.get('speed')}\")
+except Exception as e:
+    print(f\"  • Status detail error: {e}\")
+finally:
+    s.close()
+"
+        else
+            echo -e "\033[31m○ Milo Voice Daemon: INACTIVE\033[0m"
+        fi
+        ;;
+
+    logs)
+        if systemctl --user is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+            journalctl --user -u "$SERVICE_NAME" -f
+        elif [ -f "$LOG_FILE" ]; then
+            tail -f "$LOG_FILE"
+        else
+            echo "No logs found."
+        fi
+        ;;
+
+    *)
+        echo "Usage: milo-voice-daemon {start|stop|restart|status|logs}"
+        exit 1
+        ;;
+esac

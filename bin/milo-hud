@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Milo HUD — Linux Native Wayland Tactical Command Center
+# Launches instant hardware-accelerated Wayland HUD overlay on SUPER + SPACE.
+# ==============================================================================
+set -eo pipefail
+
+exec ${HOME}/.local/bin/milo-spotlight "$@"

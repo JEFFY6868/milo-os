@@ -1,0 +1,304 @@
+#!/usr/bin/env python3
+"""
+Milo Hardware VAAPI Proxy Generator (milo-proxy)
+Part of MiloOS & Milo Creator Studio.
+Uses hardware Intel/AMD GPU acceleration (renderD128 / h264_vaapi)
+to generate lightweight 720p proxies with short GOP for instant timeline scrubbing.
+"""
+
+import sys
+import os
+import subprocess
+import json
+import time
+import argparse
+from pathlib import Path
+
+CYAN = "\033[36m"
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+BLUE = "\033[34m"
+MAGENTA = "\033[35m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
+RESET = "\033[0m"
+RED = "\033[31m"
+
+VAAPI_DEVICE = "/dev/dri/renderD128"
+
+
+def print_banner():
+    print(f"{CYAN}{BOLD}")
+    print("╔════════════════════════════════════════════════════════════════╗")
+    print("║   🎬 Milo Hardware VAAPI Proxy Studio — 720p Ultra-Scrub      ║")
+    print("╚════════════════════════════════════════════════════════════════╝")
+    print(f"{RESET}")
+
+
+def check_vaapi_support():
+    if not os.path.exists(VAAPI_DEVICE):
+        return False
+    try:
+        res = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-encoders"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return "h264_vaapi" in res.stdout
+    except Exception:
+        return False
+
+
+def get_video_metadata(filepath):
+    try:
+        cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height,duration,r_frame_rate,codec_name",
+            "-show_entries",
+            "format=duration,size",
+            "-of",
+            "json",
+            str(filepath),
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        data = json.loads(res.stdout)
+        stream = data.get("streams", [{}])[0]
+        fmt = data.get("format", {})
+
+        width = int(stream.get("width", 0))
+        height = int(stream.get("height", 0))
+        codec = stream.get("codec_name", "unknown")
+        duration = float(stream.get("duration") or fmt.get("duration") or 0.0)
+        size_bytes = int(fmt.get("size", 0) or os.path.getsize(filepath))
+
+        return {
+            "width": width,
+            "height": height,
+            "codec": codec,
+            "duration": duration,
+            "size": size_bytes,
+        }
+    except Exception as e:
+        return None
+
+
+def calculate_target_resolution(width, height, target_short_edge=720):
+    if width <= 0 or height <= 0:
+        return 1280, 720
+
+    is_landscape = width >= height
+    if is_landscape:
+        # Scale height to 720, maintain aspect ratio
+        target_h = target_short_edge
+        target_w = int((width / height) * target_h)
+        # Ensure even numbers
+        target_w = target_w - (target_w % 2)
+        return target_w, target_h
+    else:
+        # Scale width to 720, maintain aspect ratio
+        target_w = target_short_edge
+        target_h = int((height / width) * target_w)
+        target_h = target_h - (target_h % 2)
+        return target_w, target_h
+
+
+def generate_proxy(input_path, output_path, use_vaapi=True, gop=30, bitrate="2500k", force=False):
+    input_path = Path(input_path)
+    output_path = Path(output_path)
+
+    if not input_path.exists():
+        print(f"{RED}✖ Error: File not found: {input_path}{RESET}")
+        return False
+
+    if output_path.exists() and not force:
+        # Check if proxy is newer than input
+        if output_path.stat().st_mtime >= input_path.stat().st_mtime:
+            print(f"{YELLOW}↷ Skipping (Proxy already exists & up-to-date): {output_path.name}{RESET}")
+            return True
+
+    meta = get_video_metadata(input_path)
+    if not meta:
+        print(f"{RED}✖ Error: Could not read video metadata for {input_path.name}{RESET}")
+        return False
+
+    orig_w, orig_h = meta["width"], meta["height"]
+    duration = meta["duration"]
+    orig_mb = meta["size"] / (1024 * 1024)
+
+    target_w, target_h = calculate_target_resolution(orig_w, orig_h, 720)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    print(f"\n{BOLD}Processing:{RESET} {CYAN}{input_path.name}{RESET}")
+    print(f"  {DIM}Input:{RESET}  {orig_w}x{orig_h} [{meta['codec'].upper()}] | {orig_mb:.1f} MB | {duration/60:.1f} mins")
+    print(f"  {DIM}Output:{RESET} {target_w}x{target_h} [H.264] | GOP: {gop} frames (Fast Scrubbing)")
+
+    start_time = time.perf_counter()
+
+    if use_vaapi:
+        # Hardware VAAPI Pipeline
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-loglevel", "warning",
+            "-stats",
+            "-vaapi_device", VAAPI_DEVICE,
+            "-hwaccel", "vaapi",
+            "-hwaccel_output_format", "vaapi",
+            "-i", str(input_path),
+            "-vf", f"scale_vaapi=w={target_w}:h={target_h}",
+            "-c:v", "h264_vaapi",
+            "-b:v", bitrate,
+            "-maxrate", "3500k",
+            "-bufsize", "7000k",
+            "-g", str(gop),
+            "-c:a", "copy",
+            str(output_path),
+        ]
+    else:
+        # Fast CPU Fallback Pipeline
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-loglevel", "warning",
+            "-stats",
+            "-i", str(input_path),
+            "-vf", f"scale={target_w}:{target_h}",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "23",
+            "-g", str(gop),
+            "-c:a", "copy",
+            str(output_path),
+        ]
+
+    mode_str = f"{GREEN}⚡ GPU VAAPI (renderD128){RESET}" if use_vaapi else f"{YELLOW}⚙ CPU (libx264){RESET}"
+    print(f"  {DIM}Engine:{RESET} {mode_str}")
+
+    try:
+        proc = subprocess.run(cmd)
+        if proc.returncode != 0:
+            # If audio copy failed, retry with AAC re-encode
+            print(f"{YELLOW}  Audio copy failed. Retrying with AAC audio re-encode...{RESET}")
+            cmd[-2] = "aac"
+            cmd.insert(-1, "-b:a")
+            cmd.insert(-1, "192k")
+            proc = subprocess.run(cmd)
+            if proc.returncode != 0:
+                print(f"{RED}✖ Proxy generation failed for {input_path.name}{RESET}")
+                return False
+
+        elapsed = time.perf_counter() - start_time
+        proxy_size = os.path.getsize(output_path)
+        proxy_mb = proxy_size / (1024 * 1024)
+        saved_pct = ((meta["size"] - proxy_size) / meta["size"]) * 100 if meta["size"] > 0 else 0
+        speed_factor = duration / elapsed if elapsed > 0 and duration > 0 else 0
+
+        print(f"  {GREEN}✔ Complete!{RESET} {proxy_mb:.1f} MB ({saved_pct:.1f}% space saved) in {elapsed:.1f}s ({speed_factor:.1f}x realtime)")
+        return True
+
+    except Exception as e:
+        print(f"{RED}✖ Error during encoding: {e}{RESET}")
+        return False
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Milo Hardware VAAPI Proxy Studio — 720p Ultra-Smooth Timeline Scrubbing"
+    )
+    parser.add_argument("target", help="Video file or directory containing video files")
+    parser.add_argument("--out", "-o", help="Custom output directory for proxy files (default: ./proxies/)")
+    parser.add_argument("--gop", "-g", type=int, default=30, help="GOP keyframe interval (default: 30 frames / 1s)")
+    parser.add_argument("--bitrate", "-b", default="2500k", help="Video bitrate (default: 2500k)")
+    parser.add_argument("--force", "-f", action="store_true", help="Force overwrite existing proxies")
+    parser.add_argument("--cpu", action="store_true", help="Force CPU encoding instead of GPU VAAPI")
+
+    args = parser.parse_args()
+    print_banner()
+
+    has_vaapi = check_vaapi_support()
+    use_vaapi = has_vaapi and not args.cpu
+
+    if not has_vaapi and not args.cpu:
+        print(f"{YELLOW}Notice: VAAPI hardware acceleration not detected on {VAAPI_DEVICE}. Falling back to fast CPU encoding.{RESET}\n")
+
+    target_path = Path(args.target).resolve()
+    if not target_path.exists():
+        print(f"{RED}Target not found: {target_path}{RESET}")
+        sys.exit(1)
+
+    video_exts = {".mp4", ".mov", ".mkv", ".m4v", ".avi", ".webm"}
+
+    files_to_process = []
+    if target_path.is_file():
+        files_to_process.append(target_path)
+        out_dir = Path(args.out).resolve() if args.out else target_path.parent / "proxies"
+    else:
+        out_dir = Path(args.out).resolve() if args.out else target_path / "proxies"
+        for item in sorted(target_path.iterdir()):
+            if item.is_file() and item.suffix.lower() in video_exts:
+                # Do not re-proxy files inside a proxy folder or already named _proxy
+                if not item.name.endswith("_proxy.mp4") and item.parent.name != "proxies":
+                    files_to_process.append(item)
+
+    if not files_to_process:
+        print(f"{YELLOW}No video files found to process in {target_path}{RESET}")
+        sys.exit(0)
+
+    print(f"Found {BOLD}{len(files_to_process)}{RESET} video file(s).")
+    print(f"Proxy destination: {CYAN}{out_dir}{RESET}\n")
+
+    total_orig_bytes = 0
+    total_proxy_bytes = 0
+    success_count = 0
+
+    t0 = time.perf_counter()
+
+    for idx, f in enumerate(files_to_process, 1):
+        print(f"[{idx}/{len(files_to_process)}]", end=" ")
+        base_name = f.stem
+        proxy_name = f"{base_name}_proxy.mp4"
+        out_file = out_dir / proxy_name
+
+        orig_size = f.stat().st_size
+        total_orig_bytes += orig_size
+
+        ok = generate_proxy(
+            f,
+            out_file,
+            use_vaapi=use_vaapi,
+            gop=args.gop,
+            bitrate=args.bitrate,
+            force=args.force,
+        )
+
+        if ok and out_file.exists():
+            success_count += 1
+            total_proxy_bytes += out_file.stat().st_size
+
+    total_time = time.perf_counter() - t0
+    orig_total_gb = total_orig_bytes / (1024**3)
+    proxy_total_gb = total_proxy_bytes / (1024**3)
+    saved_gb = orig_total_gb - proxy_total_gb
+    pct = (saved_gb / orig_total_gb) * 100 if orig_total_gb > 0 else 0
+
+    print(f"\n{GREEN}{BOLD}════════════════════════════════════════════════════════════════{RESET}")
+    print(f"{GREEN}{BOLD}✔ Batch Proxy Generation Complete!{RESET}")
+    print(f"  • Successfully processed: {success_count}/{len(files_to_process)} files")
+    print(f"  • Original total size:   {orig_total_gb:.2f} GB")
+    print(f"  • Proxy total size:      {proxy_total_gb:.2f} GB")
+    print(f"  • Storage saved:         {saved_gb:.2f} GB ({pct:.1f}% reduction)")
+    print(f"  • Total time elapsed:    {total_time:.1f}s")
+    print(f"{GREEN}{BOLD}════════════════════════════════════════════════════════════════{RESET}\n")
+
+
+if __name__ == "__main__":
+    main()
