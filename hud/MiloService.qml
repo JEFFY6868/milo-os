@@ -72,14 +72,12 @@ Item {
     if (quickCmdProc.running) quickCmdProc.running = false
     quickCmdProc.command = [root.homeDir + "/.local/bin/milo-calendar", "quick", text.trim()]
     quickCmdProc.running = true
-    root.playSound("chirp")
   }
 
   function removeAgendaEvent(id) {
     if (quickCmdProc.running) quickCmdProc.running = false
     quickCmdProc.command = [root.homeDir + "/.local/bin/milo-calendar", "rm", id.toString()]
     quickCmdProc.running = true
-    root.playSound("chirp")
   }
 
   // Milo Autonomous Evolution Protocol (MEP-1)
@@ -1755,7 +1753,6 @@ Item {
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
                   root.midLeftTab = "tasks"
-                  root.playSound("chirp")
                 }
               }
             }
@@ -1784,7 +1781,6 @@ Item {
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
                   root.midLeftTab = "agenda"
-                  root.playSound("chirp")
                 }
               }
             }
@@ -1946,9 +1942,9 @@ Item {
                   Layout.fillWidth: true
                   height: 30
                   radius: 5
-                  color: modelData.is_active ? Qt.rgba(0, 0.9, 1.0, 0.2) : Qt.rgba(0.06, 0.12, 0.16, 0.65)
-                  border.color: modelData.is_active ? "#00f0ff" : Qt.rgba(0, 0.8, 1.0, 0.22)
-                  border.width: 1
+                  color: modelData.is_active ? Qt.rgba(0, 0.9, 1.0, 0.22) : (modelData.is_past ? Qt.rgba(0.04, 0.06, 0.08, 0.45) : Qt.rgba(0.06, 0.12, 0.16, 0.65))
+                  border.color: modelData.is_active ? "#00f0ff" : (modelData.is_past ? Qt.rgba(1, 1, 1, 0.12) : Qt.rgba(0, 0.8, 1.0, 0.22))
+                  border.width: modelData.is_active ? 1.5 : 1
 
                   RowLayout {
                     anchors.fill: parent
@@ -1961,14 +1957,14 @@ Item {
                       height: 18
                       width: 40
                       radius: 3
-                      color: Qt.rgba(0, 0, 0, 0.45)
-                      border.color: modelData.color || "#00f0ff"
+                      color: modelData.is_past ? Qt.rgba(0, 0, 0, 0.25) : Qt.rgba(0, 0, 0, 0.45)
+                      border.color: modelData.is_past ? Qt.rgba(1, 1, 1, 0.2) : (modelData.color || "#00f0ff")
                       border.width: 1
 
                       Text {
                         anchors.centerIn: parent
                         text: modelData.event_time || "--:--"
-                        color: modelData.color || "#00f0ff"
+                        color: modelData.is_past ? Qt.rgba(1, 1, 1, 0.4) : (modelData.color || "#00f0ff")
                         font.pixelSize: 9
                         font.bold: true
                         font.family: "monospace"
@@ -1983,9 +1979,10 @@ Item {
                       Text {
                         Layout.fillWidth: true
                         text: modelData.title || ""
-                        color: "#ffffff"
+                        color: modelData.is_past ? Qt.rgba(1, 1, 1, 0.4) : "#ffffff"
+                        font.strikeout: modelData.is_past
                         font.pixelSize: 10
-                        font.bold: true
+                        font.bold: !modelData.is_past
                         font.family: "system-ui, sans-serif"
                         elide: Text.ElideRight
                       }
@@ -1993,7 +1990,7 @@ Item {
                       Text {
                         Layout.fillWidth: true
                         text: modelData.status_text || ""
-                        color: modelData.is_active ? "#00f0ff" : Qt.rgba(1, 1, 1, 0.45)
+                        color: modelData.is_active ? "#00f0ff" : (modelData.is_past ? Qt.rgba(0, 1.0, 0.5, 0.6) : Qt.rgba(1, 1, 1, 0.45))
                         font.pixelSize: 8
                         font.family: "monospace"
                         elide: Text.ElideRight
@@ -3649,7 +3646,6 @@ Item {
                   cursorShape: Qt.PointingHandCursor
                   onClicked: {
                     root.midLeftTab = "tasks"
-                    root.playSound("chirp")
                   }
                 }
               }
@@ -3675,7 +3671,6 @@ Item {
                   cursorShape: Qt.PointingHandCursor
                   onClicked: {
                     root.midLeftTab = "agenda"
-                    root.playSound("chirp")
                   }
                 }
               }
@@ -4129,7 +4124,6 @@ Item {
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
                   root.reloadAgenda()
-                  root.playSound("chirp")
                 }
               }
             }
@@ -4178,9 +4172,9 @@ Item {
                   Layout.fillWidth: true
                   height: 48
                   radius: 7
-                  color: modelData.is_active ? Qt.rgba(0, 0.9, 1.0, 0.18) : Qt.rgba(0.04, 0.10, 0.14, 0.75)
-                  border.color: modelData.is_active ? "#00f0ff" : Qt.rgba(0, 0.8, 1.0, 0.3)
-                  border.width: 1.2
+                  color: modelData.is_active ? Qt.rgba(0, 0.9, 1.0, 0.18) : (modelData.is_past ? Qt.rgba(0.04, 0.06, 0.08, 0.5) : Qt.rgba(0.04, 0.10, 0.14, 0.75))
+                  border.color: modelData.is_active ? "#00f0ff" : (modelData.is_past ? Qt.rgba(1, 1, 1, 0.12) : Qt.rgba(0, 0.8, 1.0, 0.3))
+                  border.width: modelData.is_active ? 1.5 : 1.2
 
                   RowLayout {
                     anchors.fill: parent
@@ -4191,19 +4185,19 @@ Item {
                     // Color stripe
                     Rectangle {
                       width: 4; height: 34; radius: 2
-                      color: modelData.color || "#00f0ff"
+                      color: modelData.is_past ? Qt.rgba(1, 1, 1, 0.25) : (modelData.color || "#00f0ff")
                     }
 
                     // Time badge
                     Rectangle {
                       width: 58; height: 26; radius: 4
-                      color: Qt.rgba(0, 0, 0, 0.55)
-                      border.color: modelData.color || "#00f0ff"
+                      color: modelData.is_past ? Qt.rgba(0, 0, 0, 0.25) : Qt.rgba(0, 0, 0, 0.55)
+                      border.color: modelData.is_past ? Qt.rgba(1, 1, 1, 0.2) : (modelData.color || "#00f0ff")
                       border.width: 1
                       Text {
                         anchors.centerIn: parent
                         text: modelData.event_time || "--:--"
-                        color: modelData.color || "#00f0ff"
+                        color: modelData.is_past ? Qt.rgba(1, 1, 1, 0.4) : (modelData.color || "#00f0ff")
                         font.pixelSize: 11
                         font.bold: true
                         font.family: "monospace"
@@ -4219,21 +4213,22 @@ Item {
                         spacing: 8
                         Text {
                           text: modelData.title || ""
-                          color: "#ffffff"
+                          color: modelData.is_past ? Qt.rgba(1, 1, 1, 0.4) : "#ffffff"
+                          font.strikeout: modelData.is_past
                           font.pixelSize: 12
-                          font.bold: true
+                          font.bold: !modelData.is_past
                           font.family: "system-ui, sans-serif"
                         }
                         Rectangle {
                           height: 14
                           width: catText.implicitWidth + 8
                           radius: 3
-                          color: Qt.rgba(0, 0.9, 1.0, 0.15)
+                          color: modelData.is_past ? Qt.rgba(1, 1, 1, 0.08) : Qt.rgba(0, 0.9, 1.0, 0.15)
                           Text {
                             id: catText
                             anchors.centerIn: parent
                             text: (modelData.category || "EVENT").toUpperCase()
-                            color: "#80f5ff"
+                            color: modelData.is_past ? Qt.rgba(1, 1, 1, 0.4) : "#80f5ff"
                             font.pixelSize: 8
                             font.family: "monospace"
                           }
@@ -4255,14 +4250,14 @@ Item {
                       height: 20
                       width: statusText.implicitWidth + 10
                       radius: 3
-                      color: modelData.is_active ? Qt.rgba(0, 0.9, 1.0, 0.25) : Qt.rgba(1, 1, 1, 0.08)
+                      color: modelData.is_active ? Qt.rgba(0, 0.9, 1.0, 0.25) : (modelData.is_past ? Qt.rgba(0, 1.0, 0.5, 0.15) : Qt.rgba(1, 1, 1, 0.08))
                       border.color: modelData.is_active ? "#00f0ff" : "transparent"
                       border.width: 1
                       Text {
                         id: statusText
                         anchors.centerIn: parent
                         text: modelData.status_text || ""
-                        color: modelData.is_active ? "#00f0ff" : Qt.rgba(1, 1, 1, 0.6)
+                        color: modelData.is_active ? "#00f0ff" : (modelData.is_past ? Qt.rgba(0, 1.0, 0.5, 0.8) : Qt.rgba(1, 1, 1, 0.6))
                         font.pixelSize: 9
                         font.family: "monospace"
                       }

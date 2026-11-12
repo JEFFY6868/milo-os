@@ -184,6 +184,35 @@ def cmd_add(args):
 
 def cmd_quick(args):
     text = args.text.strip()
+    
+    # 1. Parse date from natural text if not passed explicitly
+    norm_date = None
+    if args.date:
+        norm_date = parse_date(args.date)
+    else:
+        m_date = re.search(r'\b(tomorrow|tom|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b', text, re.I)
+        if m_date:
+            try:
+                norm_date = parse_date(m_date.group(1))
+                text = (text[:m_date.start()] + text[m_date.end():]).strip()
+            except Exception:
+                norm_date = date.today().isoformat()
+        else:
+            norm_date = date.today().isoformat()
+
+    # 2. Parse duration from natural text
+    duration = args.duration if (args.duration and args.duration != 60) else 60
+    m_dur_hr = re.search(r'\b(?:for\s+)?(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hours)\b', text, re.I)
+    if m_dur_hr:
+        duration = int(float(m_dur_hr.group(1)) * 60)
+        text = (text[:m_dur_hr.start()] + text[m_dur_hr.end():]).strip()
+    else:
+        m_dur_min = re.search(r'\b(?:for\s+)?(\d+)\s*(?:m|min|mins|minutes)\b', text, re.I)
+        if m_dur_min:
+            duration = int(m_dur_min.group(1))
+            text = (text[:m_dur_min.start()] + text[m_dur_min.end():]).strip()
+
+    # 3. Parse time from natural text
     m = re.search(r'\b(\d{1,2}(?::\d{2})?\s*(?:am|pm)|\d{1,2}:\d{2})\b', text, re.I)
     if m:
         t_str = m.group(1)
@@ -198,23 +227,40 @@ def cmd_quick(args):
         now = datetime.now()
         next_hour = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
         norm_time = next_hour.strftime("%H:%M")
-        title = text
+        title = text or "Quick Event"
 
-    norm_date = parse_date(args.date) if args.date else date.today().isoformat()
-    cat = (args.category or "work").lower()
-    color = args.color or CATEGORY_COLORS.get(cat, "#ff0838")
+    # Clean punctuation and extra spaces
+    title = re.sub(r'\s+', ' ', title).strip(' -:,()')
+
+    # 4. Detect category from title keywords
+    cat = (args.category or "").lower() if args.category != "work" else ""
+    if not cat:
+        lower_t = title.lower()
+        if any(k in lower_t for k in ["meeting", "sync", "standup", "call", "interview"]):
+            cat = "meeting"
+        elif any(k in lower_t for k in ["focus", "deep work", "study", "code", "coding", "design", "arch"]):
+            cat = "focus"
+        elif any(k in lower_t for k in ["gym", "workout", "run", "meditate", "health", "doctor"]):
+            cat = "health"
+        elif any(k in lower_t for k in ["lunch", "dinner", "coffee", "movie", "break", "personal"]):
+            cat = "personal"
+        else:
+            cat = "work"
+
+    color = args.color or CATEGORY_COLORS.get(cat, "#00f0ff" if cat == "focus" else "#ff0838")
     
     conn = get_db()
     with conn:
         cur = conn.execute("""
             INSERT INTO events (title, event_date, event_time, duration_min, category, color, description)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (title, norm_date, norm_time, args.duration, cat, color, args.desc or ""))
+        """, (title, norm_date, norm_time, duration, cat, color, args.desc or ""))
         event_id = cur.lastrowid
         
     sync_cache()
     time_fmt = datetime.strptime(norm_time, "%H:%M").strftime("%I:%M %p")
-    print(f"{GREEN}✓ Event Scheduled [ID: {event_id}]{RESET}: {title} @ {time_fmt}")
+    d_display = "Today" if norm_date == date.today().isoformat() else norm_date
+    print(f"{GREEN}✓ Event Scheduled [ID: {event_id}]{RESET}: {title} @ {time_fmt} ({duration}m, {cat.upper()}) on {d_display}")
 
 def cmd_today(args):
     events = sync_cache()
@@ -392,10 +438,11 @@ def cmd_daemon(args):
                         conn.execute("UPDATE events SET reminded = 1 WHERE id = ?", (r["id"],))
                         print(f"🔔 ALERT: '{title}' starting in 5 minutes! Triggering speech & chime.")
                         
-                        # Tactical sound
-                        sound_bin = Path.home() / ".local" / "bin" / "milo-sound"
-                        if sound_bin.exists():
-                            subprocess.run([str(sound_bin), "alert"], check=False)
+                        # Tactical sound (only if explicit --sound enabled)
+                        if getattr(args, "sound", False):
+                            sound_bin = Path.home() / ".local" / "bin" / "milo-sound"
+                            if sound_bin.exists():
+                                subprocess.run([str(sound_bin), "alert"], check=False)
                             
                         # Desktop notification
                         subprocess.run([
@@ -460,7 +507,8 @@ def main():
     subparsers.add_parser("briefing", help="Emit spoken natural language briefing for milo-speak")
     
     # daemon
-    subparsers.add_parser("daemon", help="Run background reminder watcher")
+    p_daemon = subparsers.add_parser("daemon", help="Run background reminder watcher")
+    p_daemon.add_argument("--sound", action="store_true", help="Enable sound effects for alerts (default: muted)")
     
     args = parser.parse_args()
     if not args.command:
