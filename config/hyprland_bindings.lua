@@ -63,7 +63,7 @@ o.bind("SUPER + SHIFT + F", "Milo Files", "/home/jeffy/.local/bin/milo-files")
 
 -- Firefox Browser & Milo Drop
 o.bind("SUPER + B", "Firefox Browser", { launch = "firefox", focus = "firefox" })
-o.bind("SUPER + L", "Milo Drop", { tui = "milo-drop recv" })
+o.bind("SUPER + L", "Milo Drop", "/home/jeffy/.local/bin/milo-drop gui")
 
 -- Telegram Desktop
 o.bind("SUPER + T", "Telegram Desktop", "telegram-desktop")
