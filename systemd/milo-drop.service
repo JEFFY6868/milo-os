@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /home/jeffy/Projects/milo-os/drop/server.py
+ExecStart=/usr/bin/python3 %h/.local/share/milo/drop/server.py
 Restart=always
 RestartSec=3
 Environment=PYTHONUNBUFFERED=1

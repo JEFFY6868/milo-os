@@ -7,14 +7,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-if [ -d "$SCRIPT_DIR/drop" ]; then
+if [ -d "$HOME/.local/share/milo/drop" ]; then
+    DROP_DIR="$HOME/.local/share/milo/drop"
+elif [ -d "$SCRIPT_DIR/drop" ]; then
     DROP_DIR="$SCRIPT_DIR/drop"
-elif [ -d "/home/jeffy/Projects/milo-os/drop" ]; then
-    DROP_DIR="/home/jeffy/Projects/milo-os/drop"
 elif [ -d "$HOME/.local/share/milo-drop" ]; then
     DROP_DIR="$HOME/.local/share/milo-drop"
 else
-    DROP_DIR="/home/jeffy/Projects/milo-os/drop"
+    DROP_DIR="$HOME/.local/share/milo/drop"
 fi
 
 CLI_BIN=""

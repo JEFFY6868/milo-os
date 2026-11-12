@@ -59,6 +59,8 @@ cp -ru "$SCRIPT_DIR/core/evolution/"* "$HOME/.local/share/milo/evolution/" 2>/de
 cp -ru "$SCRIPT_DIR/core/voice/"* "$HOME/.local/share/milo/voice/" 2>/dev/null || cp -r "$SCRIPT_DIR/core/voice/"* "$HOME/.local/share/milo/voice/"
 cp -ru "$SCRIPT_DIR/core/phonon/"* "$HOME/.local/share/milo/phonon/" 2>/dev/null || cp -r "$SCRIPT_DIR/core/phonon/"* "$HOME/.local/share/milo/phonon/"
 cp -ru "$SCRIPT_DIR/core/sound/fx/"* "$HOME/.local/share/milo/sound/fx/" 2>/dev/null || cp -r "$SCRIPT_DIR/core/sound/fx/"* "$HOME/.local/share/milo/sound/fx/"
+mkdir -p "$HOME/.local/share/milo/drop"
+cp -ru "$SCRIPT_DIR/drop/"* "$HOME/.local/share/milo/drop/" 2>/dev/null || cp -r "$SCRIPT_DIR/drop/"* "$HOME/.local/share/milo/drop/"
 echo -e "${GREEN}[✓] Core engines deployed.${NC}"
 
 # 5. Deploy Quickshell Arc Reactor HUD
