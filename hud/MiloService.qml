@@ -1888,7 +1888,7 @@ Item {
         width: 235; height: 245
         radius: 14
         color: Qt.rgba(0.06, 0.01, 0.02, 0.85)
-        border.color: root.midLeftTab === "agenda" ? Qt.rgba(0, 0.9, 1.0, 0.4) : Qt.rgba(1.0, 0.03, 0.22, 0.45)
+        border.color: root.midLeftTab === "mail" ? Qt.rgba(1.0, 0.67, 0.0, 0.45) : (root.midLeftTab === "agenda" ? Qt.rgba(0, 0.9, 1.0, 0.4) : Qt.rgba(1.0, 0.03, 0.22, 0.45))
         border.width: 1.2
 
         ColumnLayout {
@@ -1896,15 +1896,16 @@ Item {
           anchors.margins: 10
           spacing: 6
 
-          // Header: Dual-Tab Switcher & Stats
+          // Header: Tri-Tab Switcher & Stats
           RowLayout {
             Layout.fillWidth: true
-            spacing: 5
+            Layout.alignment: Qt.AlignTop
+            spacing: 4
 
             // Tasks Tab Button
             Rectangle {
               height: 20
-              width: tasksTabLabel.implicitWidth + 12
+              width: tasksTabLabel.implicitWidth + 10
               radius: 4
               color: root.midLeftTab === "tasks" ? "#ff0838" : Qt.rgba(1, 0.03, 0.22, 0.15)
               border.color: root.midLeftTab === "tasks" ? "#ffffff" : Qt.rgba(1, 0.03, 0.22, 0.4)
@@ -1915,7 +1916,7 @@ Item {
                 anchors.centerIn: parent
                 text: "✦ TASKS"
                 color: root.midLeftTab === "tasks" ? "#ffffff" : "#ff8899"
-                font.pixelSize: 9
+                font.pixelSize: 8
                 font.bold: true
                 font.family: "monospace"
               }
@@ -1932,7 +1933,7 @@ Item {
             // Agenda Tab Button
             Rectangle {
               height: 20
-              width: agendaTabLabel.implicitWidth + 12
+              width: agendaTabLabel.implicitWidth + 10
               radius: 4
               color: root.midLeftTab === "agenda" ? "#00f0ff" : Qt.rgba(0, 0.9, 1.0, 0.15)
               border.color: root.midLeftTab === "agenda" ? "#ffffff" : Qt.rgba(0, 0.9, 1.0, 0.4)
@@ -1943,7 +1944,7 @@ Item {
                 anchors.centerIn: parent
                 text: "📅 AGENDA"
                 color: root.midLeftTab === "agenda" ? "#060102" : "#80f5ff"
-                font.pixelSize: 9
+                font.pixelSize: 8
                 font.bold: true
                 font.family: "monospace"
               }
@@ -1957,20 +1958,20 @@ Item {
               }
             }
 
-            // Mail Pill in HUD Header
+            // Mail Tab Button in HUD Header
             Rectangle {
               height: 20
               width: hudMailLabel.implicitWidth + 8
               radius: 4
-              color: root.mailData && root.mailData.unread_count > 0 ? Qt.rgba(1.0, 0.67, 0.0, 0.25) : Qt.rgba(1, 1, 1, 0.08)
-              border.color: root.mailData && root.mailData.unread_count > 0 ? "#ffaa00" : Qt.rgba(1, 1, 1, 0.2)
+              color: root.midLeftTab === "mail" ? "#ffaa00" : (root.mailData && root.mailData.unread_count > 0 ? Qt.rgba(1.0, 0.67, 0.0, 0.25) : Qt.rgba(1, 1, 1, 0.08))
+              border.color: root.midLeftTab === "mail" ? "#ffffff" : (root.mailData && root.mailData.unread_count > 0 ? "#ffaa00" : Qt.rgba(1, 1, 1, 0.2))
               border.width: 1
 
               Text {
                 id: hudMailLabel
                 anchors.centerIn: parent
                 text: root.mailData && root.mailData.unread_count > 0 ? ("✉ " + root.mailData.unread_count) : "✉"
-                color: root.mailData && root.mailData.unread_count > 0 ? "#ffaa00" : Qt.rgba(1, 1, 1, 0.45)
+                color: root.midLeftTab === "mail" ? "#060102" : (root.mailData && root.mailData.unread_count > 0 ? "#ffaa00" : Qt.rgba(1, 1, 1, 0.45))
                 font.pixelSize: 8
                 font.bold: true
                 font.family: "monospace"
@@ -1981,7 +1982,6 @@ Item {
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
                   root.midLeftTab = "mail"
-                  root.scratchpadModalOpen = true
                 }
               }
             }
@@ -1991,7 +1991,7 @@ Item {
             // Expand Modal Button
             Text {
               text: "⛶"
-              color: root.midLeftTab === "agenda" ? "#00f0ff" : "#ff2a55"
+              color: root.midLeftTab === "mail" ? "#ffaa00" : (root.midLeftTab === "agenda" ? "#00f0ff" : "#ff2a55")
               font.pixelSize: 11
               MouseArea {
                 anchors.fill: parent
@@ -2009,11 +2009,13 @@ Item {
                     if (root.todosList[i].done) doneCount++
                   }
                   return doneCount + "/" + root.todosList.length + " DONE"
-                } else {
+                } else if (root.midLeftTab === "agenda") {
                   return root.agendaList.length + " TODAY"
+                } else {
+                  return (root.mailData && root.mailData.unread_count ? root.mailData.unread_count : 0) + " UNREAD"
                 }
               }
-              color: root.midLeftTab === "agenda" ? Qt.rgba(0, 0.9, 1.0, 0.7) : Qt.rgba(1, 1, 1, 0.5)
+              color: root.midLeftTab === "mail" ? "#ffaa00" : (root.midLeftTab === "agenda" ? Qt.rgba(0, 0.9, 1.0, 0.7) : Qt.rgba(1, 1, 1, 0.5))
               font.pixelSize: 8
               font.family: "monospace"
               MouseArea {
@@ -2123,6 +2125,53 @@ Item {
                   anchors.fill: parent
                   cursorShape: Qt.PointingHandCursor
                   onClicked: root.tasksWrapAll = !root.tasksWrapAll
+                }
+              }
+            }
+          }
+
+          // Mail Mini-Toolbar (Desktop HUD - Mail Tab)
+          Rectangle {
+            Layout.fillWidth: true
+            height: 18
+            radius: 4
+            visible: root.midLeftTab === "mail"
+            color: Qt.rgba(0.12, 0.08, 0.02, 0.5)
+            border.color: Qt.rgba(1.0, 0.67, 0.0, 0.25)
+            border.width: 1
+
+            RowLayout {
+              anchors.fill: parent
+              anchors.leftMargin: 6
+              anchors.rightMargin: 6
+              spacing: 6
+
+              Text {
+                text: "✉ GMAIL INBOX"
+                color: "#ffaa00"
+                font.pixelSize: 8
+                font.bold: true
+                font.family: "monospace"
+              }
+
+              Item { Layout.fillWidth: true }
+
+              Text {
+                text: root.mailData && root.mailData.user ? (root.mailData.user.indexOf("@") !== -1 ? root.mailData.user.split("@")[0] : root.mailData.user) : "Offline"
+                color: Qt.rgba(1, 1, 1, 0.45)
+                font.pixelSize: 7
+                font.family: "monospace"
+                elide: Text.ElideRight
+                Layout.maximumWidth: 90
+              }
+
+              Text {
+                text: "🔄"
+                font.pixelSize: 8
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.mailSync()
                 }
               }
             }
@@ -2356,6 +2405,121 @@ Item {
           }
 
           // ------------------------------------------------------------------
+          // VIEW 3: GMAIL INBOX LIST (visible when midLeftTab === "mail")
+          // ------------------------------------------------------------------
+          ScrollView {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            clip: true
+            visible: root.midLeftTab === "mail"
+
+            ColumnLayout {
+              width: scratchpadCard.width - 20
+              spacing: 4
+
+              // Empty or Not Configured State
+              Item {
+                Layout.fillWidth: true
+                height: 54
+                visible: !root.mailData || !root.mailData.emails || root.mailData.emails.length === 0
+
+                Rectangle {
+                  anchors.fill: parent
+                  radius: 5
+                  color: Qt.rgba(0.08, 0.05, 0.02, 0.55)
+                  border.color: (!root.mailData || !root.mailData.user) ? Qt.rgba(1.0, 0.67, 0.0, 0.3) : Qt.rgba(0, 1.0, 0.5, 0.3)
+                  border.width: 1
+
+                  ColumnLayout {
+                    anchors.centerIn: parent
+                    spacing: 2
+                    Text {
+                      Layout.alignment: Qt.AlignHCenter
+                      text: (!root.mailData || !root.mailData.user) ? "✉ GMAIL NOT CONFIGURED" : "✔ INBOX ZERO"
+                      color: (!root.mailData || !root.mailData.user) ? "#ffaa00" : "#00ff88"
+                      font.pixelSize: 8
+                      font.bold: true
+                      font.family: "monospace"
+                    }
+                    Text {
+                      Layout.alignment: Qt.AlignHCenter
+                      text: (!root.mailData || !root.mailData.user) ? "Click ⛶ or run 'milo-mail setup'" : "All emails read"
+                      color: Qt.rgba(1, 1, 1, 0.45)
+                      font.pixelSize: 7
+                      font.family: "system-ui, sans-serif"
+                    }
+                  }
+                }
+              }
+
+              // Email Cards Repeater (Desktop HUD)
+              Repeater {
+                model: root.mailData && root.mailData.emails ? root.mailData.emails : []
+                delegate: Rectangle {
+                  id: deskMailRow
+                  required property var modelData
+                  required property int index
+                  Layout.fillWidth: true
+                  height: 36
+                  radius: 5
+                  color: Qt.rgba(0.12, 0.08, 0.02, 0.70)
+                  border.color: Qt.rgba(1.0, 0.67, 0.0, 0.25)
+                  border.width: 1
+
+                  ColumnLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 6; anchors.rightMargin: 6
+                    anchors.topMargin: 3; anchors.bottomMargin: 3
+                    spacing: 1
+
+                    RowLayout {
+                      Layout.fillWidth: true
+                      spacing: 4
+
+                      Text {
+                        text: modelData.from || "Unknown"
+                        color: "#ffd480"
+                        font.pixelSize: 8
+                        font.bold: true
+                        font.family: "system-ui, sans-serif"
+                        elide: Text.ElideRight
+                        Layout.maximumWidth: 135
+                      }
+
+                      Item { Layout.fillWidth: true }
+
+                      Text {
+                        text: modelData.time_rel || ""
+                        color: Qt.rgba(1, 1, 1, 0.40)
+                        font.pixelSize: 7
+                        font.family: "monospace"
+                      }
+                    }
+
+                    Text {
+                      Layout.fillWidth: true
+                      text: modelData.subject || "(No Subject)"
+                      color: "#ffffff"
+                      font.pixelSize: 8
+                      font.family: "system-ui, sans-serif"
+                      elide: Text.ElideRight
+                    }
+                  }
+
+                  MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                      quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Email #" + modelData.id, root.homeDir + "/.local/bin/milo-mail", "read", modelData.id]
+                      quickCmdProc.running = true
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // ------------------------------------------------------------------
           // INPUT 1: Add Task Row (visible when midLeftTab === "tasks")
           // ------------------------------------------------------------------
           Rectangle {
@@ -2481,8 +2645,7 @@ Item {
                     deskAgendaInput.focus = false
                     event.accepted = true
                   } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
-                    root.midLeftTab = "tasks"
-                    deskTaskInput.forceActiveFocus()
+                    root.midLeftTab = "mail"
                     event.accepted = true
                   }
                 }
@@ -2502,6 +2665,86 @@ Item {
                     root.addAgendaQuick(val)
                     deskAgendaInput.text = ""
                   }
+                }
+              }
+            }
+          }
+
+          // ------------------------------------------------------------------
+          // INPUT 3: Quick Action Strip (visible when midLeftTab === "mail")
+          // ------------------------------------------------------------------
+          Rectangle {
+            Layout.fillWidth: true
+            height: 24; radius: 5
+            color: Qt.rgba(0.08, 0.05, 0.02, 0.85)
+            border.color: Qt.rgba(1.0, 0.67, 0.0, 0.4)
+            border.width: 1
+            visible: root.midLeftTab === "mail"
+
+            RowLayout {
+              anchors.fill: parent
+              anchors.leftMargin: 6; anchors.rightMargin: 6
+              spacing: 5
+
+              // 🎙 AI Briefing Button
+              Rectangle {
+                Layout.fillWidth: true
+                height: 18; radius: 3
+                color: Qt.rgba(1.0, 0.67, 0.0, 0.15)
+                border.color: Qt.rgba(1.0, 0.67, 0.0, 0.3)
+                border.width: 1
+                RowLayout {
+                  anchors.centerIn: parent
+                  spacing: 3
+                  Text { text: "🎙"; font.pixelSize: 8 }
+                  Text {
+                    text: "AI BRIEF"
+                    color: "#ffd480"
+                    font.pixelSize: 8
+                    font.bold: true
+                    font.family: "monospace"
+                  }
+                }
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.mailSummarize()
+                }
+              }
+
+              // 🔄 Sync Button
+              Rectangle {
+                width: 22; height: 18; radius: 3
+                color: Qt.rgba(1.0, 0.67, 0.0, 0.15)
+                border.color: Qt.rgba(1.0, 0.67, 0.0, 0.3)
+                border.width: 1
+                Text {
+                  anchors.centerIn: parent
+                  text: "🔄"
+                  font.pixelSize: 8
+                }
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.mailSync()
+                }
+              }
+
+              // 🌐 Open Webmail
+              Rectangle {
+                width: 22; height: 18; radius: 3
+                color: Qt.rgba(1.0, 0.67, 0.0, 0.15)
+                border.color: Qt.rgba(1.0, 0.67, 0.0, 0.3)
+                border.width: 1
+                Text {
+                  anchors.centerIn: parent
+                  text: "🌐"
+                  font.pixelSize: 8
+                }
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.mailOpenWeb()
                 }
               }
             }
@@ -5227,8 +5470,7 @@ Item {
                     root.scratchpadModalOpen = false
                     event.accepted = true
                   } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
-                    root.midLeftTab = "tasks"
-                    modalTaskInput.forceActiveFocus()
+                    root.midLeftTab = "mail"
                     event.accepted = true
                   }
                 }
