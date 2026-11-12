@@ -3,7 +3,7 @@
 # Milo Evolution Engine CLI (milo-evolve)
 # Supervised Self-Upgrade & Autonomous Feature Genesis Protocol (MEP-1)
 # ==============================================================================
-set -e
+set -eo pipefail
 
 PYTHON_BIN="${HOME}/.local/share/milo/venv/bin/python3"
 EVO_DIR="${HOME}/.local/share/milo/evolution"
@@ -47,14 +47,15 @@ case "$cmd" in
         fi
         echo -e "\033[1;36m✨ [Milo Thought-to-Code] Synthesizing custom tool from wish...\033[0m"
         echo -e "   \033[0;35m• Wish:\033[0m $wish_prompt"
-        "$PYTHON_BIN" -c "
+        "$PYTHON_BIN" - "$wish_prompt" <<'PY'
 import sys
 import json
 from synthesizer import MiloSynthesizer
 from supervisor import MiloSupervisor
 
+wish_text = sys.argv[1]
 synth = MiloSynthesizer()
-prop = synth.generate_from_llm_wish('$wish_prompt')
+prop = synth.generate_from_llm_wish(wish_text)
 if not prop:
     print('❌ Failed to formulate proposal from wish.')
     sys.exit(1)
@@ -63,7 +64,7 @@ path = synth.save_proposal(prop)
 print(f'✔ Proposal formulated: {path}')
 sup = MiloSupervisor()
 sup.brief(prop)
-"
+PY
         ;;
 
     audit)

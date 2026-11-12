@@ -27,6 +27,7 @@ class MiloSupervisor:
         self.ensure_ledger()
 
     def ensure_ledger(self):
+        EVOLUTION_DIR.mkdir(parents=True, exist_ok=True)
         if not LEDGER_FILE.exists():
             with open(LEDGER_FILE, "w") as f:
                 json.dump({"evolutions": []}, f, indent=2)
@@ -90,17 +91,22 @@ class MiloSupervisor:
                 if act_type in ("create_script", "write_file", "modify_file"):
                     if target_path.exists():
                         backup_path = target_path.with_suffix(f"{target_path.suffix}.bak_evo")
-                        shutil.copy2(target_path, backup_path)
+                        if not backup_path.exists():
+                            shutil.copy2(target_path, backup_path)
                         backups.append((target_path, backup_path))
                     else:
                         created_files.append(target_path)
 
                     target_path.parent.mkdir(parents=True, exist_ok=True)
-                    with open(target_path, "w") as f:
-                        f.write(action.get("content", ""))
+                    tmp_path = target_path.with_name(target_path.name + ".evo_tmp")
+                    tmp_path.write_text(action.get("content", ""), encoding="utf-8")
 
                     if action.get("executable"):
-                        os.chmod(target_path, 0o755)
+                        os.chmod(tmp_path, 0o755)
+                    elif target_path.exists():
+                        shutil.copymode(target_path, tmp_path)
+
+                    os.replace(tmp_path, target_path)
 
                     first_line = ""
                     try:
@@ -134,8 +140,11 @@ class MiloSupervisor:
             print(f"✔ [Milo Evolution] Assertion PASSED in {time.time() - t0:.2f}s!")
 
             # Step 3: Success Commit & Log
+            try:
+                self.record_success(proposal)
+            except Exception as e:
+                print(f"⚠ [Milo Evolution] Ledger write warning: {e}")
             self.clean_backups(backups)
-            self.record_success(proposal)
 
             # Unlink active proposal so it is no longer pending
             active_link = PROPOSALS_DIR / "active_proposal.json"

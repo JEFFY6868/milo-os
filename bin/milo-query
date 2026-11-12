@@ -33,10 +33,11 @@ PYTHON_BIN="${HOME}/.local/share/milo/venv/bin/python3"
 ROUTER_SCRIPT="${HOME}/.local/share/milo/cortex/intelligence_router.py"
 
 # Execute through Hybrid Intelligence Router
-RAW_OUTPUT=$("$PYTHON_BIN" "$ROUTER_SCRIPT" ask "$QUERY" 2>/tmp/milo-query-debug.log || true)
+LOG_FILE="${XDG_RUNTIME_DIR:-/tmp}/milo-query.log"
+RAW_OUTPUT=$("$PYTHON_BIN" "$ROUTER_SCRIPT" ask "$QUERY" 2>>"$LOG_FILE" || true)
 
 # Extract response and provider
-if [[ "$RAW_OUTPUT" =~ ^\[(.*)\]:\ (.*) ]]; then
+if [[ "$RAW_OUTPUT" =~ ^\[([^]]*)\]:\ (.*) ]]; then
   PROVIDER="${BASH_REMATCH[1]}"
   RESPONSE="${BASH_REMATCH[2]}"
 else

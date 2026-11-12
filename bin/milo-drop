@@ -3,6 +3,7 @@
 # milo-drop - Universal P2P AirDrop & Local Network File Sharing
 # Launches PyQt6 Cyberpunk GUI by default or handles CLI send/receive.
 # ==============================================================================
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 

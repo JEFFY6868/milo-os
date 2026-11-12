@@ -202,7 +202,7 @@ Item {
     chatAutoDismissTimer.stop()
     thinkingWatchdog.restart()
     root.hasPendingEvolution = false
-    if (evoProc.running) evoProc.running = false
+    if (evoProc.running) return;
     evoProc.command = ["/home/jeffy/.local/bin/milo-evolve", "approve"]
     evoProc.running = true
   }
@@ -929,6 +929,7 @@ Item {
     onTriggered: {
       if (root.isThinking) {
         root.isThinking = false
+        if (agyProc.running) agyProc.running = false
         if (root.miloChatOutput === "✦ Neural cortex thinking..." || !root.miloChatOutput) {
           root.miloChatOutput = "✦ Neural cortex timed out. Please try again."
           chatAutoDismissTimer.restart()
@@ -1006,7 +1007,7 @@ Item {
       root.miloChatOutput = "🧰 **[MILO SYSTEM DOCTOR ACTIVE]**\n\n✦ Running diagnostics on GPU VRAM, 15 systemd services, PipeWire sound, and Wayland bus..."
       chatAutoDismissTimer.stop()
       thinkingWatchdog.restart()
-      if (evoProc.running) evoProc.running = false
+      if (evoProc.running) return;
       evoProc.command = ["/home/jeffy/.local/bin/milo-doctor"]
       evoProc.running = true
       return
@@ -1086,7 +1087,7 @@ Item {
       root.miloChatOutput = "🔍 **[MILO FORENSIC AUDITOR ACTIVE]**\n\n✦ Scanning 70+ components, background services & UI timers for weak areas...\n✦ Running syntax checks and error-trap analysis..."
       chatAutoDismissTimer.stop()
       thinkingWatchdog.restart()
-      if (evoProc.running) evoProc.running = false
+      if (evoProc.running) return;
       evoProc.command = ["/home/jeffy/.local/bin/milo-evolve", "audit"]
       evoProc.running = true
       return
@@ -1103,7 +1104,7 @@ Item {
       root.miloChatOutput = "✨ **[THOUGHT-TO-CODE GENESIS ACTIVE]**\n\n✦ **Goal:** \"" + (wishText || raw) + "\"\n✦ Consulting Neural Cortex & Synthesizing Sandboxed Tool..."
       chatAutoDismissTimer.stop()
       thinkingWatchdog.restart()
-      if (evoProc.running) evoProc.running = false
+      if (evoProc.running) return;
       evoProc.command = ["/home/jeffy/.local/bin/milo-evolve", "wish", (wishText || raw)]
       evoProc.running = true
       return
@@ -1239,7 +1240,7 @@ Item {
       root.miloChatOutput = "✨ **[THOUGHT-TO-CODE GENESIS ACTIVE]**\n\n✦ **Goal:** \"" + directWish + "\"\n✦ Consulting Neural Cortex & Synthesizing Sandboxed Tool..."
       chatAutoDismissTimer.stop()
       thinkingWatchdog.restart()
-      if (evoProc.running) evoProc.running = false
+      if (evoProc.running) return;
       evoProc.command = ["/home/jeffy/.local/bin/milo-evolve", "wish", directWish]
       evoProc.running = true
       return
@@ -1256,10 +1257,17 @@ Item {
     root.askMilo(raw)
   }
 
-  // Quick Action Process
-  Process {
+  // Quick Action Process (Detached execution prevents process collisions and killed transactions)
+  QtObject {
     id: quickCmdProc
-    command: []
+    property var command: []
+    property bool running: false
+    onRunningChanged: if (running) {
+      if (command && command.length > 0) {
+        Quickshell.execDetached(command);
+      }
+      running = false;
+    }
   }
 
   // Autonomous Evolution & Thought-to-Code Process
@@ -1294,7 +1302,7 @@ Item {
     }
     stderr: StdioCollector {
       onStreamFinished: {
-        if (exitCode !== 0 && text && text.trim().length > 0) {
+        if (text && text.trim().length > 0) {
           root.isThinking = false
           root.hudVisible = true
           root.miloChatOutput = "✘ **Evolution / Audit Error:**\n\n" + text.trim()

@@ -162,7 +162,6 @@ def get_cortex_socket() -> Optional[Path]:
         candidates.append(Path(os.environ["XDG_RUNTIME_DIR"]) / "milo-cortex.sock")
     candidates.append(Path(f"/run/user/{os.getuid()}/milo-cortex.sock"))
     candidates.append(Path(f"/tmp/milo-cortex-{os.getuid()}.sock"))
-    candidates.append(Path("/tmp/milo-cortex-1000.sock"))
 
     for sock in candidates:
         if sock.exists():
@@ -178,8 +177,6 @@ def get_cortex_socket() -> Optional[Path]:
             except Exception:
                 pass
     return None
-
-SOCKET_PATH = get_cortex_socket() or Path(f"/run/user/{os.getuid()}/milo-cortex.sock")
 
 
 def get_mode() -> str:
@@ -214,15 +211,12 @@ def toggle_mode() -> str:
 
 
 def is_online(timeout: float = 0.5) -> bool:
-    """Sub-millisecond network reachability probe without DNS overhead."""
-    for host in [("1.1.1.1", 53), ("8.8.8.8", 53), ("1.0.0.1", 53)]:
+    """True network reachability probe via rapid TCP handshake to reliable upstreams."""
+    for host in (("1.1.1.1", 443), ("8.8.8.8", 443)):
         try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.settimeout(timeout)
-            s.connect(host)
-            s.close()
-            return True
-        except Exception:
+            with socket.create_connection(host, timeout=timeout):
+                return True
+        except OSError:
             continue
     return False
 
@@ -315,11 +309,20 @@ def query_cortex_daemon(prompt: str, max_tokens: int = 180) -> Optional[str]:
         return None
 
 
+def _deadline(fn, timeout: float):
+    """Enforce strict deadline using a daemon thread, bypassing ThreadPoolExecutor shutdown wait."""
+    import threading
+    box = []
+    t = threading.Thread(target=lambda: box.append(fn()), daemon=True)
+    t.start()
+    t.join(timeout)
+    return box[0] if box else None
+
+
 def query_gemini_cloud(prompt: str, timeout: float = 6.0) -> Optional[str]:
     """Query Gemini Cloud via Google GenAI SDK with strict timeout."""
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        # Check keys.env, eyes.env, and artemis .env
         env_candidates = [
             CONFIG_DIR / "keys.env",
             EYES_ENV_PATH,
@@ -342,11 +345,10 @@ def query_gemini_cloud(prompt: str, timeout: float = 6.0) -> Optional[str]:
     if not api_key:
         return None
 
-    import concurrent.futures
     def _call():
         try:
             from google import genai
-            client = genai.Client(api_key=api_key)
+            client = genai.Client(api_key=api_key, http_options={"timeout": int(timeout * 1000)})
             if milo_memory:
                 system_instruction = milo_memory.build_system_prompt_with_memory()
             else:
@@ -355,7 +357,7 @@ def query_gemini_cloud(prompt: str, timeout: float = 6.0) -> Optional[str]:
                     "Keep answers concise, precise, engaging, and practical. Output exact terminal syntax when requested."
                 )
             resp = client.models.generate_content(
-                model="gemini-3.8-flash",
+                model="gemini-2.5-flash",
                 contents=prompt,
                 config={"system_instruction": system_instruction}
             )
@@ -366,13 +368,7 @@ def query_gemini_cloud(prompt: str, timeout: float = 6.0) -> Optional[str]:
             sys.stderr.write(f"Gemini error: {e}\n")
             return None
 
-    try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_call)
-            return future.result(timeout=timeout)
-    except Exception as e:
-        sys.stderr.write(f"Gemini future timeout/error: {e}\n")
-        return None
+    return _deadline(_call, timeout)
 
 
 def query_groq_cloud(prompt: str, timeout: float = 4.0) -> Optional[str]:
@@ -393,11 +389,10 @@ def query_groq_cloud(prompt: str, timeout: float = 4.0) -> Optional[str]:
     if not api_key:
         return None
 
-    import concurrent.futures
     def _call():
         try:
             from groq import Groq
-            client = Groq(api_key=api_key)
+            client = Groq(api_key=api_key, timeout=timeout, max_retries=0)
             if milo_memory:
                 system_instruction = milo_memory.build_system_prompt_with_memory()
             else:
@@ -406,8 +401,7 @@ def query_groq_cloud(prompt: str, timeout: float = 4.0) -> Optional[str]:
                     "Keep answers concise, precise, engaging, and practical. Output exact terminal syntax when requested."
                 )
             # Fast, high-throughput Groq models
-            models = ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"]
-            resp = None
+            models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
             for mod in models:
                 try:
                     resp = client.chat.completions.create(
@@ -429,13 +423,7 @@ def query_groq_cloud(prompt: str, timeout: float = 4.0) -> Optional[str]:
             sys.stderr.write(f"Groq error: {e}\n")
             return None
 
-    try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_call)
-            return future.result(timeout=timeout)
-    except Exception as e:
-        sys.stderr.write(f"Groq future timeout/error: {e}\n")
-        return None
+    return _deadline(_call, timeout)
 
 
 def handle_task_intent(prompt: str) -> Optional[Tuple[str, str]]:
@@ -897,19 +885,22 @@ def handle_mail_intent(prompt: str) -> Optional[Tuple[str, str]]:
 
 def handle_pkg_intent(prompt: str) -> Optional[Tuple[str, str]]:
     """Detect and handle package install/remove/update requests."""
+    if prompt.startswith("You are Milo") or "system:" in prompt.lower() or len(prompt.split()) > 15:
+        return None
+
     p_lower = prompt.lower().strip()
 
     is_install = any(k in p_lower for k in [
-        "install ", "installing", "reinstall", "setup ", "get ", "download and install"
-    ]) or p_lower.startswith("install") or p_lower.startswith("milo install")
+        "install ", "installing ", "reinstall ", "download and install"
+    ]) or bool(re.search(r'^(?:milo\s+)?install\b', p_lower))
 
     is_remove = any(k in p_lower for k in [
-        "uninstall", "remove ", "delete package"
-    ]) or p_lower.startswith("uninstall") or p_lower.startswith("remove")
+        "uninstall ", "remove package", "delete package"
+    ]) or bool(re.search(r'^(?:milo\s+)?(?:uninstall|remove)\s+[a-z0-9]', p_lower))
 
     is_update = any(k in p_lower for k in [
         "update system", "update packages", "upgrade system", "upgrade packages"
-    ])
+    ]) or p_lower in ["update", "upgrade"]
 
     if not (is_install or is_remove or is_update):
         return None
@@ -934,7 +925,7 @@ def handle_pkg_intent(prompt: str) -> Optional[Tuple[str, str]]:
         target = re.sub(r'^(?:milo\s+)?(?:uninstall|remove|delete)\s+(?:package\s+)?', '', prompt, flags=re.IGNORECASE).strip()
     else:
         action = "install"
-        target = re.sub(r'^(?:milo\s+)?(?:c*an\s+(?:you|u)\s+)?(?:could\s+you\s+)?(?:please\s+|plz\s+)?(?:try\s+)?(?:install|installing|reinstall|setup|get|download\s+and\s+install)\s+(?:again\s+)?(?:for\s+me\s+)?', '', prompt, flags=re.IGNORECASE).strip()
+        target = re.sub(r'^(?:milo\s+)?(?:c*an\s+(?:you|u)\s+)?(?:could\s+you\s+)?(?:please\s+|plz\s+)?(?:try\s+)?(?:install|installing|reinstall|download\s+and\s+install)\s+(?:again\s+)?(?:for\s+me\s+)?', '', prompt, flags=re.IGNORECASE).strip()
         target = re.sub(r'\s+(?:again|for\s+me|please|plz)$', '', target, flags=re.IGNORECASE).strip()
 
     # If target is fuzzy or generic, check known target names
@@ -984,6 +975,9 @@ def handle_pkg_intent(prompt: str) -> Optional[Tuple[str, str]]:
 
 def handle_datetime_intent(prompt: str) -> Optional[Tuple[str, str]]:
     """Instant sub-millisecond ground-truth date, time, and day resolution."""
+    if prompt.startswith("You are Milo") or "system:" in prompt.lower() or len(prompt.split()) > 12:
+        return None
+
     p_clean = prompt.lower().strip().rstrip("?.! ")
 
     # Direct date question patterns
@@ -994,7 +988,7 @@ def handle_datetime_intent(prompt: str) -> Optional[Tuple[str, str]]:
         "date today", "current date", "what is the current date", "whats date", "what date"
     ]
     is_date = p_clean in date_patterns or (
-        "date" in p_clean and any(w in p_clean for w in ["today", "current", "what is", "whats", "what's"])
+        bool(re.search(r'\bdate\b', p_clean)) and any(w in p_clean for w in ["today", "current", "what is", "whats", "what's"])
     )
 
     # Direct time question patterns
@@ -1004,7 +998,7 @@ def handle_datetime_intent(prompt: str) -> Optional[Tuple[str, str]]:
         "what's time", "what time"
     ]
     is_time = p_clean in time_patterns or (
-        "time" in p_clean and any(w in p_clean for w in ["current", "now", "what is", "whats", "what's", "tell me"])
+        bool(re.search(r'\btime\b', p_clean)) and any(w in p_clean for w in ["current", "now", "what is", "whats", "what's", "tell me"])
         and "calendar" not in p_clean and "schedule" not in p_clean and "spend" not in p_clean
     )
 
