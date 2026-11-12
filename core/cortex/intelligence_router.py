@@ -929,12 +929,68 @@ def handle_pkg_intent(prompt: str) -> Optional[Tuple[str, str]]:
         return f"Failed to spawn package manager: {e}", "Milo Package Copilot"
 
 
+def handle_datetime_intent(prompt: str) -> Optional[Tuple[str, str]]:
+    """Instant sub-millisecond ground-truth date, time, and day resolution."""
+    p_clean = prompt.lower().strip().rstrip("?.! ")
+
+    # Direct date question patterns
+    date_patterns = [
+        "whats today date", "what's today date", "whats todays date", "what's today's date",
+        "what is today date", "what is today's date", "what is the date today", "what is the date",
+        "whats the date", "what's the date", "what date is it", "today date", "today's date",
+        "date today", "current date", "what is the current date", "whats date", "what date"
+    ]
+    is_date = p_clean in date_patterns or (
+        "date" in p_clean and any(w in p_clean for w in ["today", "current", "what is", "whats", "what's"])
+    )
+
+    # Direct time question patterns
+    time_patterns = [
+        "whats the time", "what's the time", "what time is it", "what is the time",
+        "current time", "time now", "tell me the time", "what time is it now", "whats time",
+        "what's time", "what time"
+    ]
+    is_time = p_clean in time_patterns or (
+        "time" in p_clean and any(w in p_clean for w in ["current", "now", "what is", "whats", "what's", "tell me"])
+        and "calendar" not in p_clean and "schedule" not in p_clean and "spend" not in p_clean
+    )
+
+    # Day of week patterns
+    day_patterns = [
+        "what day is it", "what day is today", "what day is it today", "which day is today",
+        "which day is it", "day of the week", "whats the day", "what's the day"
+    ]
+    is_day = p_clean in day_patterns
+
+    if not (is_date or is_time or is_day):
+        return None
+
+    now = datetime.now()
+    day_name = now.strftime("%A")
+    date_formatted = now.strftime("%B %d, %Y")
+    time_formatted = now.strftime("%I:%M %p")
+
+    if is_time and not is_date:
+        msg = f"The current time is {time_formatted} ({day_name}, {date_formatted})."
+    elif is_day and not is_date and not is_time:
+        msg = f"Today is {day_name}, {date_formatted}."
+    else:
+        msg = f"Today is {day_name}, {date_formatted}. Current time is {time_formatted}."
+
+    return msg, "Milo Chronometer"
+
+
 def execute_hybrid_query(prompt: str) -> Tuple[str, str]:
     """
     Execute query using current intelligence mode and automatic failover.
     Returns: (response_text, provider_name)
     """
-    # 0. Check package manager intent first
+    # 0. Check real-time date/time chronometer intent first
+    dt_res = handle_datetime_intent(prompt)
+    if dt_res:
+        return dt_res
+
+    # 0.1 Check package manager intent
     pkg_res = handle_pkg_intent(prompt)
     if pkg_res:
         return pkg_res

@@ -10,6 +10,7 @@ import sys
 import re
 import json
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -124,9 +125,19 @@ def build_system_prompt_with_memory() -> str:
             f"User: {d['user']}\nMilo: {d['milo']}" for d in p["recent_dialogue"]
         )
 
+    now = datetime.now()
+    live_clock = now.strftime("%A, %B %d, %Y — %I:%M %p")
+    today_iso = now.strftime("%Y-%m-%d")
+
     sys_prompt = f"""You are Milo, an ambient AI desktop companion and Arch Linux copilot for Jeffy on Hyprland.
 Persona: Witty, sharp, observant, loyal, technically elite—authentic Milo companion persona (clever, vigilant, proactive).
 You address the user as Jeffy.
+
+[LIVE SYSTEM CHRONOMETER & REAL-TIME CLOCK]
+Current Date & Time: {live_clock}
+Current ISO Date: {today_iso}
+Day of the Week: {now.strftime("%A")}
+Current Year: {now.strftime("%Y")}
 
 [PERSISTENT CORE MEMORIES & USER PROFILE]
 User: Jeffy (Lead Engineer & Architect)
