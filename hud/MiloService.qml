@@ -50,6 +50,20 @@ Item {
   property string intelligenceLabel: "🔄 AUTO (⚡ Cortex Offline)"
   property string intelligenceColor: "#ffaa00"
 
+  // Option B: Tactical Quick Settings / Control Center State
+  property bool controlCenterOpen: false
+  property int ccVolume: 50
+  property bool ccMuted: false
+  property int ccBrightness: 50
+  property bool ccWifiEnabled: true
+  property string ccWifiSSID: "JEFFY"
+  property string ccWifiIp: "192.168.1.108"
+  property bool ccBtEnabled: true
+  property string ccBtDevice: "SPA3800B"
+  property bool ccNightlightEnabled: false
+  property bool ccBarOff: true
+  property bool ccVoiceActive: true
+
   // Dynamic Persistent Milo Scratchpad & Calendar
   property bool scratchpadModalOpen: false
   property string scratchpadFilter: "all"  // "all" | "pending" | "completed"
@@ -357,6 +371,139 @@ Item {
         }
       } catch(e) {}
     }
+  }
+
+  // Milo Tactical Control Center IPC Trigger
+  FileView {
+    id: controlCenterTriggerWatcher
+    path: "/tmp/milo-control-center-trigger"
+    watchChanges: true
+    printErrors: false
+    onLoaded: {
+      try {
+        var raw = text().trim()
+        if (raw) {
+          var parts = raw.split(" ")
+          var act = parts.length > 1 ? parts[1] : parts[0]
+          if (act === "toggle") {
+            root.controlCenterOpen = !root.controlCenterOpen
+            if (root.controlCenterOpen) root.refreshControlCenter()
+          } else if (act === "open") {
+            root.controlCenterOpen = true
+            root.refreshControlCenter()
+          } else if (act === "close") {
+            root.controlCenterOpen = false
+          } else if (act === "refresh") {
+            root.refreshControlCenter()
+          }
+        }
+      } catch(e) {}
+    }
+  }
+
+  // Periodic and on-demand telemetry process for Control Center
+  Process {
+    id: ccStatusProc
+    command: [root.homeDir + "/.local/bin/milo-control-center", "status"]
+    stdout: StdioCollector {
+      onStreamFinished: {
+        try {
+          if (text && text.trim().length > 0) {
+            var lines = text.trim().split("\n")
+            var jsonStr = ""
+            var start = false
+            for (var i = 0; i < lines.length; i++) {
+              if (lines[i].trim().startsWith("{")) start = true
+              if (start) jsonStr += lines[i] + "\n"
+            }
+            if (jsonStr) {
+              var st = JSON.parse(jsonStr)
+              if (st) {
+                if (typeof st.volume === "number") root.ccVolume = st.volume
+                if (typeof st.muted === "boolean") root.ccMuted = st.muted
+                if (typeof st.brightness === "number") root.ccBrightness = st.brightness
+                if (typeof st.wifi_enabled === "boolean") root.ccWifiEnabled = st.wifi_enabled
+                if (st.wifi_ssid) root.ccWifiSSID = st.wifi_ssid
+                if (st.wifi_ip) root.ccWifiIp = st.wifi_ip
+                if (typeof st.bt_enabled === "boolean") root.ccBtEnabled = st.bt_enabled
+                if (st.bt_device) root.ccBtDevice = st.bt_device
+                if (typeof st.nightlight_enabled === "boolean") root.ccNightlightEnabled = st.nightlight_enabled
+                if (typeof st.bar_off === "boolean") root.ccBarOff = st.bar_off
+              }
+            }
+          }
+        } catch(e) {}
+      }
+    }
+  }
+
+  Timer {
+    id: ccAutoRefreshTimer
+    interval: 3000
+    repeat: true
+    running: root.controlCenterOpen
+    onTriggered: root.refreshControlCenter()
+  }
+
+  function refreshControlCenter() {
+    if (!ccStatusProc.running) ccStatusProc.running = true
+  }
+
+  function setCcVolume(val) {
+    root.ccVolume = Math.max(0, Math.min(100, Math.round(val)))
+    quickCmdProc.command = [root.homeDir + "/.local/bin/milo-control-center", "set-vol", "" + root.ccVolume]
+    quickCmdProc.running = true
+    root.playSound("tick")
+  }
+
+  function toggleCcMute() {
+    root.ccMuted = !root.ccMuted
+    quickCmdProc.command = [root.homeDir + "/.local/bin/milo-control-center", "toggle-mute"]
+    quickCmdProc.running = true
+    root.playSound("chirp")
+  }
+
+  function setCcBrightness(val) {
+    root.ccBrightness = Math.max(10, Math.min(100, Math.round(val)))
+    quickCmdProc.command = [root.homeDir + "/.local/bin/milo-control-center", "set-brightness", "" + root.ccBrightness]
+    quickCmdProc.running = true
+    root.playSound("tick")
+  }
+
+  function toggleCcWifi() {
+    root.ccWifiEnabled = !root.ccWifiEnabled
+    quickCmdProc.command = [root.homeDir + "/.local/bin/milo-control-center", "toggle-wifi"]
+    quickCmdProc.running = true
+    root.playSound("switch")
+  }
+
+  function toggleCcBluetooth() {
+    root.ccBtEnabled = !root.ccBtEnabled
+    quickCmdProc.command = [root.homeDir + "/.local/bin/milo-control-center", "toggle-bt"]
+    quickCmdProc.running = true
+    root.playSound("switch")
+  }
+
+  function toggleCcNightlight() {
+    root.ccNightlightEnabled = !root.ccNightlightEnabled
+    quickCmdProc.command = [root.homeDir + "/.local/bin/milo-control-center", "toggle-nightlight"]
+    quickCmdProc.running = true
+    root.playSound("switch")
+  }
+
+  function toggleCcTopBar() {
+    root.ccBarOff = !root.ccBarOff
+    quickCmdProc.command = [root.homeDir + "/.local/bin/milo-control-center", "toggle-bar"]
+    quickCmdProc.running = true
+    root.playSound("switch")
+  }
+
+  function openCcCommandCenter() {
+    root.controlCenterOpen = false
+    root.hudVisible = true
+    quickCmdProc.command = [root.homeDir + "/.local/bin/milo-hud"]
+    quickCmdProc.running = true
+    root.playSound("activate")
   }
 
   // Voice Dictation watcher (auto-queries when Phonon-2 finishes)
@@ -1060,6 +1207,23 @@ Item {
       return "closed"
     }
 
+    function toggleControlCenter(): string {
+      root.controlCenterOpen = !root.controlCenterOpen
+      if (root.controlCenterOpen) root.refreshControlCenter()
+      return root.controlCenterOpen ? "open" : "closed"
+    }
+
+    function openControlCenter(): string {
+      root.controlCenterOpen = true
+      root.refreshControlCenter()
+      return "open"
+    }
+
+    function closeControlCenter(): string {
+      root.controlCenterOpen = false
+      return "closed"
+    }
+
     function musicPlayPause(): string {
       root.musicPlayPause()
       return "toggled"
@@ -1264,6 +1428,39 @@ Item {
                   quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Chronometer & Calendar", "-e", "sh", "-c", "cal -3; echo ''; cal -y; echo ''; read -p 'Press Enter to dismiss...'"]
                   quickCmdProc.running = true
                   root.triggerShockwave()
+                }
+              }
+            }
+
+            // Option B Quick Settings Summon Pill
+            Rectangle {
+              height: 22
+              width: qsPillRow.implicitWidth + 18
+              radius: 5
+              color: root.controlCenterOpen ? Qt.rgba(1.0, 0.03, 0.22, 0.40) : Qt.rgba(1.0, 0.03, 0.22, 0.18)
+              border.color: "#ff0838"
+              border.width: 1
+
+              RowLayout {
+                id: qsPillRow
+                anchors.centerIn: parent
+                spacing: 5
+                Text { text: "⚙"; font.pixelSize: 10 }
+                Text {
+                  text: "SETTINGS"
+                  color: "#ffffff"
+                  font.pixelSize: 10
+                  font.bold: true
+                  font.family: "monospace"
+                }
+              }
+
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                  root.controlCenterOpen = !root.controlCenterOpen
+                  if (root.controlCenterOpen) root.refreshControlCenter()
                 }
               }
             }
@@ -6079,4 +6276,915 @@ Item {
     }
   }
 }
+
+  // ==========================================================================
+  // 7. MILO TACTICAL CONTROL CENTER OVERLAY (Option B Native Linux Overlay)
+  // WlrLayer.Overlay centered glassmorphic hardware rack & telemetry hub
+  // ==========================================================================
+  Variants {
+    model: Quickshell.screens
+
+    PanelWindow {
+      id: controlCenterPanel
+      required property var modelData
+      screen: modelData
+      visible: root.controlCenterOpen
+
+      anchors {
+        top: true
+        bottom: true
+        left: true
+        right: true
+      }
+
+      color: "transparent"
+      exclusionMode: ExclusionMode.Ignore
+      WlrLayershell.namespace: "milo-control-center"
+      WlrLayershell.layer: WlrLayer.Overlay
+      WlrLayershell.keyboardFocus: root.controlCenterOpen ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+
+      onVisibleChanged: {
+        if (visible) {
+          root.refreshControlCenter()
+          ccFocusScope.forceActiveFocus()
+        }
+      }
+
+      // Background Scrim (click to dismiss)
+      Rectangle {
+        anchors.fill: parent
+        color: Qt.rgba(0, 0, 0, 0.68)
+        MouseArea {
+          anchors.fill: parent
+          onClicked: root.controlCenterOpen = false
+        }
+      }
+
+      FocusScope {
+        id: ccFocusScope
+        anchors.fill: parent
+        focus: root.controlCenterOpen
+
+        Keys.priority: Keys.BeforeItem
+        Keys.onPressed: function(event) {
+          if (event.key === Qt.Key_Escape) {
+            root.controlCenterOpen = false
+            event.accepted = true
+          }
+        }
+
+        // Centered Tactical Control Capsule Box
+        Rectangle {
+          id: ccBox
+          width: Math.min(parent.width - 60, 880)
+          height: Math.min(parent.height - 60, 680)
+          anchors.centerIn: parent
+          radius: 16
+          color: Qt.rgba(14/255, 5/255, 9/255, 0.94)
+          border.color: Qt.rgba(255/255, 8/255, 56/255, 0.50)
+          border.width: 1
+
+          // Neon Red Top Accent Line
+          Rectangle {
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.leftMargin: 20
+            anchors.rightMargin: 20
+            height: 2
+            color: "#ff0838"
+          }
+
+          // Corner Brackets
+          Rectangle { x: 8; y: 8; width: 12; height: 2; color: "#ff0838" }
+          Rectangle { x: 8; y: 8; width: 2; height: 12; color: "#ff0838" }
+          Rectangle { x: parent.width - 20; y: 8; width: 12; height: 2; color: "#ff0838" }
+          Rectangle { x: parent.width - 10; y: 8; width: 2; height: 12; color: "#ff0838" }
+          Rectangle { x: 8; y: parent.height - 10; width: 12; height: 2; color: "#ff0838" }
+          Rectangle { x: 8; y: parent.height - 20; width: 2; height: 12; color: "#ff0838" }
+          Rectangle { x: parent.width - 20; y: parent.height - 10; width: 12; height: 2; color: "#ff0838" }
+          Rectangle { x: parent.width - 10; y: parent.height - 20; width: 2; height: 12; color: "#ff0838" }
+
+          ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 24
+            spacing: 16
+
+            // HEADER
+            RowLayout {
+              Layout.fillWidth: true
+              spacing: 12
+
+              ColumnLayout {
+                spacing: 3
+                RowLayout {
+                  spacing: 10
+                  Text {
+                    text: "TACTICAL CONTROL CENTER"
+                    color: "#ffffff"
+                    font.pixelSize: 15
+                    font.bold: true
+                    font.family: "monospace"
+                    font.letterSpacing: 1.5
+                  }
+                  Rectangle {
+                    height: 18
+                    width: 76
+                    radius: 3
+                    color: "#ff0838"
+                    Text {
+                      anchors.centerIn: parent
+                      text: "OPTION B"
+                      color: "#000000"
+                      font.pixelSize: 9
+                      font.bold: true
+                      font.family: "monospace"
+                    }
+                  }
+                }
+                Text {
+                  text: "Unified Hardware Rack & Instant Telemetry Overlay // Jeffy Protocol"
+                  color: Qt.rgba(1, 1, 1, 0.5)
+                  font.pixelSize: 10
+                  font.family: "monospace"
+                }
+              }
+
+              Item { Layout.fillWidth: true }
+
+              // Esc to close badge & Close button
+              Rectangle {
+                height: 24
+                width: 78
+                radius: 4
+                color: Qt.rgba(0, 0, 0, 0.5)
+                border.color: Qt.rgba(1, 1, 1, 0.15)
+                Text {
+                  anchors.centerIn: parent
+                  text: "ESC to close"
+                  color: Qt.rgba(1, 1, 1, 0.45)
+                  font.pixelSize: 9
+                  font.family: "monospace"
+                }
+              }
+
+              Rectangle {
+                width: 30
+                height: 30
+                radius: 15
+                color: closeCcArea.containsMouse ? "#ff0838" : Qt.rgba(1.0, 0.03, 0.22, 0.15)
+                border.color: "#ff0838"
+                border.width: 1
+
+                Text {
+                  anchors.centerIn: parent
+                  text: "✕"
+                  color: closeCcArea.containsMouse ? "#000000" : "#ff0838"
+                  font.pixelSize: 12
+                  font.bold: true
+                }
+
+                MouseArea {
+                  id: closeCcArea
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.controlCenterOpen = false
+                }
+              }
+            }
+
+            // ROW 1: MASTER AUDIO & DISPLAY BRIGHTNESS SLIDERS
+            RowLayout {
+              Layout.fillWidth: true
+              spacing: 16
+
+              // CARD 1: MASTER AUDIO
+              Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 185
+                radius: 10
+                color: Qt.rgba(26/255, 8/255, 15/255, 0.70)
+                border.color: Qt.rgba(255/255, 8/255, 56/255, 0.30)
+                border.width: 1
+
+                ColumnLayout {
+                  anchors.fill: parent
+                  anchors.margins: 14
+                  spacing: 10
+
+                  RowLayout {
+                    Layout.fillWidth: true
+                    Text {
+                      text: "🔊  MASTER AUDIO"
+                      color: "#ffffff"
+                      font.pixelSize: 12
+                      font.bold: true
+                      font.family: "monospace"
+                    }
+                    Item { Layout.fillWidth: true }
+                    Rectangle {
+                      height: 22
+                      width: 50
+                      radius: 4
+                      color: Qt.rgba(1.0, 0.03, 0.22, 0.20)
+                      border.color: "#ff0838"
+                      Text {
+                        anchors.centerIn: parent
+                        text: (root.ccMuted ? "MUTED" : root.ccVolume + "%")
+                        color: "#ff2a55"
+                        font.pixelSize: 11
+                        font.bold: true
+                        font.family: "monospace"
+                      }
+                    }
+                  }
+
+                  RowLayout {
+                    Layout.fillWidth: true
+                    Text {
+                      text: (root.ccMuted ? "Audio Output Silenced" : ((root.ccVolume == 0 ? "-∞" : Math.round((root.ccVolume - 100) * 0.5)) + " dB Output Level"))
+                      color: Qt.rgba(1, 1, 1, 0.45)
+                      font.pixelSize: 10
+                      font.family: "monospace"
+                    }
+                    Item { Layout.fillWidth: true }
+                    Text {
+                      text: root.ccMuted ? "MUTED [ON]" : "MUTE [OFF]"
+                      color: root.ccMuted ? Qt.rgba(1, 1, 1, 0.4) : "#ff0838"
+                      font.pixelSize: 10
+                      font.bold: true
+                      font.family: "monospace"
+                      MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.toggleCcMute()
+                      }
+                    }
+                  }
+
+                  // Custom Slider
+                  Slider {
+                    id: ccVolSlider
+                    Layout.fillWidth: true
+                    from: 0
+                    to: 100
+                    value: root.ccVolume
+                    stepSize: 1
+                    onMoved: root.setCcVolume(value)
+
+                    background: Rectangle {
+                      x: ccVolSlider.leftPadding
+                      y: ccVolSlider.topPadding + ccVolSlider.availableHeight / 2 - height / 2
+                      implicitWidth: 200
+                      implicitHeight: 8
+                      width: ccVolSlider.availableWidth
+                      height: implicitHeight
+                      radius: 4
+                      color: Qt.rgba(1, 1, 1, 0.08)
+
+                      Rectangle {
+                        width: ccVolSlider.visualPosition * parent.width
+                        height: parent.height
+                        color: "#ff0838"
+                        radius: 4
+                      }
+                    }
+
+                    handle: Rectangle {
+                      x: ccVolSlider.leftPadding + ccVolSlider.visualPosition * (ccVolSlider.availableWidth - width)
+                      y: ccVolSlider.topPadding + ccVolSlider.availableHeight / 2 - height / 2
+                      implicitWidth: 18
+                      implicitHeight: 18
+                      radius: 9
+                      color: "#ffffff"
+                      border.color: "#ff0838"
+                      border.width: 3
+                    }
+                  }
+
+                  // Equalizer animated wave
+                  Row {
+                    Layout.fillWidth: true
+                    height: 12
+                    spacing: 4
+                    Repeater {
+                      model: 24
+                      Rectangle {
+                        width: Math.max(3, (parent.width - 24 * 4) / 24)
+                        height: root.ccMuted ? 3 : Math.max(3, Math.min(12, Math.floor(Math.sin((index + ccVolTimer.tick) * 0.5) * 6 + 6) * (root.ccVolume / 100)))
+                        color: Qt.rgba(1.0, 0.03, 0.22, 0.65)
+                        radius: 1
+                        anchors.bottom: parent.bottom
+                      }
+                    }
+                  }
+
+                  // Preset chips
+                  RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Repeater {
+                      model: [25, 50, 75, 100]
+                      Rectangle {
+                        Layout.fillWidth: true
+                        height: 22
+                        radius: 4
+                        color: root.ccVolume === modelData ? Qt.rgba(1.0, 0.03, 0.22, 0.35) : Qt.rgba(1, 1, 1, 0.05)
+                        border.color: root.ccVolume === modelData ? "#ff0838" : Qt.rgba(1, 1, 1, 0.1)
+                        Text {
+                          anchors.centerIn: parent
+                          text: modelData + "%"
+                          color: root.ccVolume === modelData ? "#ff2a55" : Qt.rgba(1, 1, 1, 0.6)
+                          font.pixelSize: 10
+                          font.bold: true
+                          font.family: "monospace"
+                        }
+                        MouseArea {
+                          anchors.fill: parent
+                          cursorShape: Qt.PointingHandCursor
+                          onClicked: root.setCcVolume(modelData)
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+
+              // CARD 2: DISPLAY BRIGHTNESS
+              Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 185
+                radius: 10
+                color: Qt.rgba(26/255, 8/255, 15/255, 0.70)
+                border.color: Qt.rgba(255/255, 8/255, 56/255, 0.30)
+                border.width: 1
+
+                ColumnLayout {
+                  anchors.fill: parent
+                  anchors.margins: 14
+                  spacing: 10
+
+                  RowLayout {
+                    Layout.fillWidth: true
+                    Text {
+                      text: "☀️  DISPLAY BRIGHTNESS"
+                      color: "#ffffff"
+                      font.pixelSize: 12
+                      font.bold: true
+                      font.family: "monospace"
+                    }
+                    Item { Layout.fillWidth: true }
+                    Rectangle {
+                      height: 22
+                      width: 50
+                      radius: 4
+                      color: Qt.rgba(1.0, 0.6, 0.0, 0.20)
+                      border.color: "#ffaa00"
+                      Text {
+                        anchors.centerIn: parent
+                        text: root.ccBrightness + "%"
+                        color: "#ffaa00"
+                        font.pixelSize: 11
+                        font.bold: true
+                        font.family: "monospace"
+                      }
+                    }
+                  }
+
+                  RowLayout {
+                    Layout.fillWidth: true
+                    Text {
+                      text: (root.ccBrightness * 5) + " cd/m² · QHD 240Hz"
+                      color: Qt.rgba(1, 1, 1, 0.45)
+                      font.pixelSize: 10
+                      font.family: "monospace"
+                    }
+                    Item { Layout.fillWidth: true }
+                    Text {
+                      text: "AUTO-LUX: OFF"
+                      color: "#00ff88"
+                      font.pixelSize: 10
+                      font.bold: true
+                      font.family: "monospace"
+                    }
+                  }
+
+                  // Custom Brightness Slider
+                  Slider {
+                    id: ccBrightSlider
+                    Layout.fillWidth: true
+                    from: 10
+                    to: 100
+                    value: root.ccBrightness
+                    stepSize: 1
+                    onMoved: root.setCcBrightness(value)
+
+                    background: Rectangle {
+                      x: ccBrightSlider.leftPadding
+                      y: ccBrightSlider.topPadding + ccBrightSlider.availableHeight / 2 - height / 2
+                      implicitWidth: 200
+                      implicitHeight: 8
+                      width: ccBrightSlider.availableWidth
+                      height: implicitHeight
+                      radius: 4
+                      color: Qt.rgba(1, 1, 1, 0.08)
+
+                      Rectangle {
+                        width: ccBrightSlider.visualPosition * parent.width
+                        height: parent.height
+                        color: "#ffaa00"
+                        radius: 4
+                      }
+                    }
+
+                    handle: Rectangle {
+                      x: ccBrightSlider.leftPadding + ccBrightSlider.visualPosition * (ccBrightSlider.availableWidth - width)
+                      y: ccBrightSlider.topPadding + ccBrightSlider.availableHeight / 2 - height / 2
+                      implicitWidth: 18
+                      implicitHeight: 18
+                      radius: 9
+                      color: "#ffffff"
+                      border.color: "#ffaa00"
+                      border.width: 3
+                    }
+                  }
+
+                  // Spacer to align with EQ bar
+                  Item {
+                    Layout.fillWidth: true
+                    height: 12
+                  }
+
+                  // Preset chips
+                  RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Repeater {
+                      model: [
+                        { label: "20% ECO", val: 20 },
+                        { label: "50% NORM", val: 50 },
+                        { label: "85% TACT", val: 85 },
+                        { label: "MAX 100%", val: 100 }
+                      ]
+                      Rectangle {
+                        Layout.fillWidth: true
+                        height: 22
+                        radius: 4
+                        color: root.ccBrightness === modelData.val ? Qt.rgba(1.0, 0.6, 0.0, 0.35) : Qt.rgba(1, 1, 1, 0.05)
+                        border.color: root.ccBrightness === modelData.val ? "#ffaa00" : Qt.rgba(1, 1, 1, 0.1)
+                        Text {
+                          anchors.centerIn: parent
+                          text: modelData.label
+                          color: root.ccBrightness === modelData.val ? "#ffaa00" : Qt.rgba(1, 1, 1, 0.6)
+                          font.pixelSize: 9
+                          font.bold: true
+                          font.family: "monospace"
+                        }
+                        MouseArea {
+                          anchors.fill: parent
+                          cursorShape: Qt.PointingHandCursor
+                          onClicked: root.setCcBrightness(modelData.val)
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+
+            // ROW 2: WI-FI & BLUETOOTH CONNECTIVITY HUB
+            RowLayout {
+              Layout.fillWidth: true
+              spacing: 16
+
+              // CARD 3: WI-FI
+              Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 155
+                radius: 10
+                color: Qt.rgba(26/255, 8/255, 15/255, 0.70)
+                border.color: Qt.rgba(255/255, 8/255, 56/255, 0.30)
+                border.width: 1
+
+                ColumnLayout {
+                  anchors.fill: parent
+                  anchors.margins: 14
+                  spacing: 10
+
+                  RowLayout {
+                    Layout.fillWidth: true
+                    Text {
+                      text: "📶  " + (root.ccWifiEnabled ? root.ccWifiSSID + " (Active)" : "Wi-Fi Disabled")
+                      color: "#ffffff"
+                      font.pixelSize: 12
+                      font.bold: true
+                      font.family: "monospace"
+                    }
+                    Item { Layout.fillWidth: true }
+
+                    // Custom Switch
+                    Rectangle {
+                      width: 40
+                      height: 20
+                      radius: 10
+                      color: root.ccWifiEnabled ? Qt.rgba(0, 0.94, 1.0, 0.35) : Qt.rgba(1, 1, 1, 0.1)
+                      border.color: root.ccWifiEnabled ? "#00f0ff" : Qt.rgba(1, 1, 1, 0.2)
+
+                      Rectangle {
+                        width: 14
+                        height: 14
+                        radius: 7
+                        y: 3
+                        x: root.ccWifiEnabled ? 23 : 3
+                        color: root.ccWifiEnabled ? "#ffffff" : Qt.rgba(1, 1, 1, 0.4)
+                        Behavior on x { NumberAnimation { duration: 150 } }
+                      }
+
+                      MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.toggleCcWifi()
+                      }
+                    }
+                  }
+
+                  Text {
+                    text: "5.8 GHz · WPA3 · IP: " + root.ccWifiIp
+                    color: Qt.rgba(1, 1, 1, 0.45)
+                    font.pixelSize: 10
+                    font.family: "monospace"
+                  }
+
+                  Item { Layout.fillHeight: true }
+
+                  Rectangle {
+                    Layout.fillWidth: true
+                    height: 28
+                    radius: 4
+                    color: wifiBtnArea.containsMouse ? Qt.rgba(0, 0.94, 1.0, 0.25) : Qt.rgba(0, 0.94, 1.0, 0.12)
+                    border.color: "#00f0ff"
+                    border.width: 1
+
+                    RowLayout {
+                      anchors.centerIn: parent
+                      spacing: 6
+                      Text {
+                        text: "SCAN / CONNECT ACCESS POINTS ➔"
+                        color: "#00f0ff"
+                        font.pixelSize: 10
+                        font.bold: true
+                        font.family: "monospace"
+                      }
+                    }
+
+                    MouseArea {
+                      id: wifiBtnArea
+                      anchors.fill: parent
+                      hoverEnabled: true
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: {
+                        quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Network Manager", "nmtui"]
+                        quickCmdProc.running = true
+                      }
+                    }
+                  }
+                }
+              }
+
+              // CARD 4: BLUETOOTH
+              Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 155
+                radius: 10
+                color: Qt.rgba(26/255, 8/255, 15/255, 0.70)
+                border.color: Qt.rgba(255/255, 8/255, 56/255, 0.30)
+                border.width: 1
+
+                ColumnLayout {
+                  anchors.fill: parent
+                  anchors.margins: 14
+                  spacing: 10
+
+                  RowLayout {
+                    Layout.fillWidth: true
+                    Text {
+                      text: "󰂯  BLUETOOTH 5.3"
+                      color: "#ffffff"
+                      font.pixelSize: 12
+                      font.bold: true
+                      font.family: "monospace"
+                    }
+                    Item { Layout.fillWidth: true }
+
+                    // Custom Switch
+                    Rectangle {
+                      width: 40
+                      height: 20
+                      radius: 10
+                      color: root.ccBtEnabled ? Qt.rgba(1.0, 0.03, 0.22, 0.35) : Qt.rgba(1, 1, 1, 0.1)
+                      border.color: root.ccBtEnabled ? "#ff0838" : Qt.rgba(1, 1, 1, 0.2)
+
+                      Rectangle {
+                        width: 14
+                        height: 14
+                        radius: 7
+                        y: 3
+                        x: root.ccBtEnabled ? 23 : 3
+                        color: root.ccBtEnabled ? "#ffffff" : Qt.rgba(1, 1, 1, 0.4)
+                        Behavior on x { NumberAnimation { duration: 150 } }
+                      }
+
+                      MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.toggleCcBluetooth()
+                      }
+                    }
+                  }
+
+                  Text {
+                    text: root.ccBtEnabled ? (root.ccBtDevice !== "None" ? "Connected: " + root.ccBtDevice : "Radio Active · Ready to Pair") : "Bluetooth Radio Disabled"
+                    color: Qt.rgba(1, 1, 1, 0.45)
+                    font.pixelSize: 10
+                    font.family: "monospace"
+                    elide: Text.ElideRight
+                    Layout.fillWidth: true
+                  }
+
+                  Item { Layout.fillHeight: true }
+
+                  Rectangle {
+                    Layout.fillWidth: true
+                    height: 28
+                    radius: 4
+                    color: btBtnArea.containsMouse ? Qt.rgba(1.0, 0.03, 0.22, 0.25) : Qt.rgba(1.0, 0.03, 0.22, 0.12)
+                    border.color: "#ff0838"
+                    border.width: 1
+
+                    RowLayout {
+                      anchors.centerIn: parent
+                      spacing: 6
+                      Text {
+                        text: "+ PAIR NEW HARDWARE ➔"
+                        color: "#ff2a55"
+                        font.pixelSize: 10
+                        font.bold: true
+                        font.family: "monospace"
+                      }
+                    }
+
+                    MouseArea {
+                      id: btBtnArea
+                      anchors.fill: parent
+                      hoverEnabled: true
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: {
+                        quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Bluetooth Manager", "bluetoothctl"]
+                        quickCmdProc.running = true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+
+            // ROW 3: TACTICAL MODE MATRIX (NIGHT LIGHT, COMMAND CENTER, VOICE SENTINEL, TOP BAR)
+            Text {
+              text: "✦ TACTICAL MODE MATRIX & QUICK TOGGLES"
+              color: Qt.rgba(1, 1, 1, 0.4)
+              font.pixelSize: 10
+              font.bold: true
+              font.family: "monospace"
+              font.letterSpacing: 1
+            }
+
+            RowLayout {
+              Layout.fillWidth: true
+              spacing: 12
+
+              // TILE 1: NIGHT LIGHT
+              Rectangle {
+                Layout.fillWidth: true
+                height: 75
+                radius: 8
+                color: root.ccNightlightEnabled ? Qt.rgba(1.0, 0.6, 0.0, 0.25) : Qt.rgba(26/255, 8/255, 15/255, 0.70)
+                border.color: root.ccNightlightEnabled ? "#ffaa00" : Qt.rgba(255/255, 8/255, 56/255, 0.25)
+                border.width: 1
+
+                ColumnLayout {
+                  anchors.fill: parent
+                  anchors.margins: 10
+                  RowLayout {
+                    Text { text: "🌙"; font.pixelSize: 16 }
+                    Item { Layout.fillWidth: true }
+                    Rectangle {
+                      width: 7; height: 7; radius: 3.5
+                      color: root.ccNightlightEnabled ? "#ffaa00" : Qt.rgba(1,1,1,0.2)
+                    }
+                  }
+                  Item { Layout.fillHeight: true }
+                  Text {
+                    text: "NIGHT LIGHT"
+                    color: "#ffffff"
+                    font.pixelSize: 11
+                    font.bold: true
+                    font.family: "monospace"
+                  }
+                  Text {
+                    text: root.ccNightlightEnabled ? "4000K Active" : "Hyprsunset 4000K"
+                    color: Qt.rgba(1, 1, 1, 0.45)
+                    font.pixelSize: 9
+                    font.family: "monospace"
+                  }
+                }
+
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.toggleCcNightlight()
+                }
+              }
+
+              // TILE 2: COMMAND CENTER (REPLACING GAME MODE!)
+              Rectangle {
+                Layout.fillWidth: true
+                height: 75
+                radius: 8
+                color: Qt.rgba(1.0, 0.03, 0.22, 0.20)
+                border.color: "#ff0838"
+                border.width: 1
+
+                ColumnLayout {
+                  anchors.fill: parent
+                  anchors.margins: 10
+                  RowLayout {
+                    Text { text: "🎯"; font.pixelSize: 16 }
+                    Item { Layout.fillWidth: true }
+                    Rectangle {
+                      width: 7; height: 7; radius: 3.5
+                      color: "#ff0838"
+                    }
+                  }
+                  Item { Layout.fillHeight: true }
+                  Text {
+                    text: "COMMAND CENTER"
+                    color: "#ffffff"
+                    font.pixelSize: 11
+                    font.bold: true
+                    font.family: "monospace"
+                  }
+                  Text {
+                    text: "Milo Tactical HUD"
+                    color: "#ff2a55"
+                    font.pixelSize: 9
+                    font.bold: true
+                    font.family: "monospace"
+                  }
+                }
+
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.openCcCommandCenter()
+                }
+              }
+
+              // TILE 3: VOICE SENTINEL
+              Rectangle {
+                Layout.fillWidth: true
+                height: 75
+                radius: 8
+                color: root.ccVoiceActive ? Qt.rgba(0, 1.0, 0.53, 0.18) : Qt.rgba(26/255, 8/255, 15/255, 0.70)
+                border.color: root.ccVoiceActive ? "#00ff88" : Qt.rgba(255/255, 8/255, 56/255, 0.25)
+                border.width: 1
+
+                ColumnLayout {
+                  anchors.fill: parent
+                  anchors.margins: 10
+                  RowLayout {
+                    Text { text: "🎙"; font.pixelSize: 16 }
+                    Item { Layout.fillWidth: true }
+                    Rectangle {
+                      width: 7; height: 7; radius: 3.5
+                      color: root.ccVoiceActive ? "#00ff88" : Qt.rgba(1,1,1,0.2)
+                    }
+                  }
+                  Item { Layout.fillHeight: true }
+                  Text {
+                    text: "VOICE SENTINEL"
+                    color: "#ffffff"
+                    font.pixelSize: 11
+                    font.bold: true
+                    font.family: "monospace"
+                  }
+                  Text {
+                    text: root.ccVoiceActive ? "Active Mic" : "Mic Muted"
+                    color: Qt.rgba(1, 1, 1, 0.45)
+                    font.pixelSize: 9
+                    font.family: "monospace"
+                  }
+                }
+
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: {
+                    root.ccVoiceActive = !root.ccVoiceActive
+                    quickCmdProc.command = [root.homeDir + "/.local/bin/milo-vol", "mic-mute"]
+                    quickCmdProc.running = true
+                  }
+                }
+              }
+
+              // TILE 4: TOP BAR
+              Rectangle {
+                Layout.fillWidth: true
+                height: 75
+                radius: 8
+                color: root.ccBarOff ? Qt.rgba(26/255, 8/255, 15/255, 0.70) : Qt.rgba(0, 0.94, 1.0, 0.18)
+                border.color: root.ccBarOff ? Qt.rgba(255/255, 8/255, 56/255, 0.25) : "#00f0ff"
+                border.width: 1
+
+                ColumnLayout {
+                  anchors.fill: parent
+                  anchors.margins: 10
+                  RowLayout {
+                    Text { text: "🖥"; font.pixelSize: 16 }
+                    Item { Layout.fillWidth: true }
+                    Rectangle {
+                      width: 7; height: 7; radius: 3.5
+                      color: root.ccBarOff ? "#ff0838" : "#00ff88"
+                    }
+                  }
+                  Item { Layout.fillHeight: true }
+                  Text {
+                    text: "TOP BAR"
+                    color: "#ffffff"
+                    font.pixelSize: 11
+                    font.bold: true
+                    font.family: "monospace"
+                  }
+                  Text {
+                    text: root.ccBarOff ? "bar-off Active" : "Top Bar Visible"
+                    color: Qt.rgba(1, 1, 1, 0.45)
+                    font.pixelSize: 9
+                    font.family: "monospace"
+                  }
+                }
+
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.toggleCcTopBar()
+                }
+              }
+            }
+
+            Item { Layout.fillHeight: true }
+
+            // FOOTER
+            Rectangle {
+              Layout.fillWidth: true
+              height: 1
+              color: Qt.rgba(255/255, 8/255, 56/255, 0.2)
+            }
+
+            RowLayout {
+              Layout.fillWidth: true
+              Text {
+                text: "HOST: ALIENWARE M16   KERNEL: 6.11-CACHYOS   COMPOSITOR: HYPRLAND"
+                color: Qt.rgba(1, 1, 1, 0.4)
+                font.pixelSize: 9
+                font.family: "monospace"
+              }
+              Item { Layout.fillWidth: true }
+              Rectangle {
+                height: 18; width: 68; radius: 3
+                color: Qt.rgba(1, 1, 1, 0.08)
+                Text {
+                  anchors.centerIn: parent
+                  text: "SUPER + S"
+                  color: "#ffffff"
+                  font.pixelSize: 9
+                  font.bold: true
+                  font.family: "monospace"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  Timer {
+    id: ccVolTimer
+    interval: 80
+    repeat: true
+    running: root.controlCenterOpen && !root.ccMuted
+    property int tick: 0
+    onTriggered: tick = (tick + 1) % 1000
+  }
 }
+

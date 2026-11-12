@@ -123,5 +123,9 @@ o.bind("SUPER + ALT + T", "Milo Aider QA Debugger", { tui = "/home/jeffy/.local/
 o.bind("SUPER + ALT + D", "Milo CEO Dispatcher", { tui = "/home/jeffy/.local/bin/milo-dispatch" })
 o.bind("SUPER + ALT + S", "Milo Scratchpad Matrix", "/home/jeffy/.local/bin/milo-task gui")
 
+--- Milo Tactical Control Center (Option B Native Overlay)
+hl.unbind("SUPER + S")
+o.bind("SUPER + S", "Milo Tactical Control Center", "/home/jeffy/.local/bin/milo-control-center toggle")
+
 
 
