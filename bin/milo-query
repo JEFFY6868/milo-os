@@ -33,7 +33,11 @@ PYTHON_BIN="${HOME}/.local/share/milo/venv/bin/python3"
 ROUTER_SCRIPT="${HOME}/.local/share/milo/cortex/intelligence_router.py"
 
 # Execute through Hybrid Intelligence Router
-LOG_FILE="${XDG_RUNTIME_DIR:-/tmp}/milo-query.log"
+if [[ -n "${XDG_RUNTIME_DIR:-}" && -d "${XDG_RUNTIME_DIR}" && -w "${XDG_RUNTIME_DIR}" ]]; then
+  LOG_FILE="${XDG_RUNTIME_DIR}/milo-query.log"
+else
+  LOG_FILE="/tmp/milo-query.log"
+fi
 RAW_OUTPUT=$("$PYTHON_BIN" "$ROUTER_SCRIPT" ask "$QUERY" 2>>"$LOG_FILE" || true)
 
 # Extract response and provider
