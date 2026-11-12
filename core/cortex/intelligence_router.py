@@ -21,6 +21,7 @@ import time
 import subprocess
 import urllib.request
 import urllib.parse
+from datetime import datetime, date
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, Generator, List
 
@@ -528,6 +529,110 @@ def handle_task_intent(prompt: str) -> Optional[Tuple[str, str]]:
     return None
 
 
+def get_calendar_context_summary() -> str:
+    """Return compact text summary of today's calendar for LLM context injection."""
+    cache = Path.home() / ".local" / "share" / "milo" / "calendar" / "agenda_today.json"
+    if not cache.exists():
+        return ""
+    try:
+        events = json.loads(cache.read_text(encoding="utf-8"))
+        if not events:
+            return "No scheduled events for today. Horizon is clear."
+        lines = []
+        for e in events:
+            status = " [ACTIVE NOW]" if e.get("is_active") else (" [COMPLETED]" if e.get("is_past") else f" [{e.get('status_text', '')}]")
+            lines.append(f"• {e.get('event_time')} ({e.get('duration_min')}m): {e.get('title')}{status}")
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
+def handle_calendar_intent(prompt: str) -> Optional[Tuple[str, str]]:
+    """Intercept natural language calendar queries & actions to query or manipulate Milo Calendar."""
+    if prompt.startswith("You are Milo") or "system:" in prompt.lower() or len(prompt.split()) > 35:
+        return None
+
+    p = prompt.strip().lower()
+    milo_cal_bin = Path.home() / ".local" / "bin" / "milo-calendar"
+    if not milo_cal_bin.exists():
+        return None
+
+    # 1. Spoken Daily / Morning Briefing
+    if re.search(r'\b(?:give\s+me\s+my\s+|what(?:\'?s|\s+is)\s+my\s+)?(?:daily\s+|morning\s+|calendar\s+)?briefing\b', p) or \
+       re.search(r'\bbrief\s+(?:me\s+on\s+)?(?:today|my\s+day|the\s+day)\b', p):
+        try:
+            res = subprocess.run([str(milo_cal_bin), "briefing"], capture_output=True, text=True, timeout=5)
+            if res.returncode == 0 and res.stdout.strip():
+                return res.stdout.strip(), "Milo Calendar Copilot"
+        except Exception:
+            pass
+
+    # 2. Next Event Countdown / Query
+    if re.search(r'\b(?:what(?:\'?s|\s+is)\s+(?:my\s+|the\s+)?next\s+(?:event|meeting|item|appointment)|when\s+is\s+my\s+next\s+(?:event|meeting|appointment)|next\s+event|upcoming\s+event)\b', p) or \
+       p in ["next event", "what's next", "whats next", "upcoming event"]:
+        try:
+            res = subprocess.run([str(milo_cal_bin), "next"], capture_output=True, text=True, timeout=5)
+            if res.returncode == 0 and res.stdout.strip():
+                clean_out = re.sub(r'\x1b\[[0-9;]*m', '', res.stdout.strip())
+                return clean_out, "Milo Calendar Copilot"
+        except Exception:
+            pass
+
+    # 3. Schedule / Add to Calendar: "schedule X", "add to calendar X", "put on calendar X"
+    sched_match = re.match(r'^(?:milo\s+)?(?:schedule|add\s+to\s+calendar|put\s+on\s+(?:my\s+)?calendar|calendar\s+add|book)\s*[:\-]?\s*(.+)$', p, re.IGNORECASE)
+    if sched_match:
+        sched_text = prompt.strip()[sched_match.start(1):].strip().strip('"\'')
+        if sched_text:
+            try:
+                res = subprocess.run([str(milo_cal_bin), "quick", sched_text], capture_output=True, text=True, timeout=6)
+                if res.returncode == 0 and res.stdout.strip():
+                    clean_out = re.sub(r'\x1b\[[0-9;]*m', '', res.stdout.strip())
+                    return clean_out, "Milo Calendar Copilot"
+            except Exception as e:
+                return f"Failed to schedule event: {e}", "Milo Calendar Copilot"
+
+    # 4. Today's Agenda / Schedule: "what's on my calendar today", "my agenda", "show calendar"
+    if re.search(r'\b(?:what(?:\'?s|\s+is|\s+are)\s+(?:on\s+)?(?:my\s+|the\s+)?(?:calendar|agenda|schedule)(?:\s+today)?|today(?:\'s)?\s+(?:calendar|agenda|schedule|events)|show\s+(?:my\s+)?calendar|check\s+(?:my\s+)?calendar|my\s+schedule\s+today)\b', p):
+        try:
+            res = subprocess.run([str(milo_cal_bin), "today", "--json"], capture_output=True, text=True, timeout=5)
+            if res.returncode == 0 and res.stdout.strip():
+                events = json.loads(res.stdout.strip())
+                if not events:
+                    return "No tactical events scheduled for today. Your schedule is completely open, Sir.", "Milo Calendar Copilot"
+                resp = f"Here is your agenda for today ({date.today().strftime('%A, %b %d')}):\n"
+                for ev in events:
+                    t_str = datetime.strptime(ev["event_time"], "%H:%M").strftime("%I:%M %p")
+                    dur = f"{ev.get('duration_min', 60)}m"
+                    cat = ev.get('category', 'work').upper()
+                    status = ev.get('status_text', '')
+                    if ev.get("is_active"):
+                        icon = "● ACTIVE NOW"
+                    elif ev.get("is_past"):
+                        icon = "✔ COMPLETED"
+                    else:
+                        icon = f"⏳ {status}"
+                    resp += f"• [{t_str} - {dur}] {ev['title']} ({cat}) · {icon}\n"
+                    if ev.get("description"):
+                        resp += f"    ↳ {ev['description']}\n"
+                return resp.strip(), "Milo Calendar Copilot"
+        except Exception as e:
+            sys.stderr.write(f"Calendar today intent error: {e}\n")
+
+    # 5. Remove / Delete Event: "delete event X", "remove event X", "cancel event X"
+    rm_match = re.search(r'\b(?:delete|remove|cancel)\s+(?:calendar\s+)?event\s*#?\s*(\d+)\b', p)
+    if rm_match:
+        ev_id = rm_match.group(1)
+        try:
+            res = subprocess.run([str(milo_cal_bin), "rm", ev_id], capture_output=True, text=True, timeout=5)
+            if res.returncode == 0:
+                clean_out = re.sub(r'\x1b\[[0-9;]*m', '', res.stdout.strip())
+                return clean_out, "Milo Calendar Copilot"
+        except Exception:
+            pass
+
+    return None
+
+
 def handle_camera_intent(prompt: str) -> Optional[Tuple[str, str]]:
     """Intercept conversational requests to inspect user or physical surroundings via webcam."""
     if prompt.startswith("You are Milo") or "system:" in prompt.lower() or len(prompt.split()) > 30:
@@ -563,7 +668,7 @@ def handle_camera_intent(prompt: str) -> Optional[Tuple[str, str]]:
         return None
 
     try:
-        cmd = [str(Path.home() / ".local/bin/milo-look"), "--raw"]
+        cmd = ["/home/jeffy/.local/bin/milo-look", "--raw"]
         if "posture" in p or "ergonomics" in p:
             cmd.append("--posture")
         elif "desk" in p or "workspace" in p:
@@ -592,6 +697,11 @@ def execute_hybrid_query(prompt: str) -> Tuple[str, str]:
     if task_res:
         return task_res
 
+    # 0.1 Check calendar-specific intent
+    cal_res = handle_calendar_intent(prompt)
+    if cal_res:
+        return cal_res
+
     # 1. Check optical vision intent
     cam_res = handle_camera_intent(prompt)
     if cam_res:
@@ -608,6 +718,14 @@ def execute_hybrid_query(prompt: str) -> Tuple[str, str]:
 
     # Pre-fetch live web/GitHub context or live search if online
     query_prompt = prompt
+
+    # Inject live calendar context if relevant to the conversational query
+    lower_prompt = prompt.lower()
+    cal_keywords = ["calendar", "schedule", "free", "busy", "meeting", "events", "agenda", "afternoon", "evening", "plans", "tomorrow", "today"]
+    if any(k in lower_prompt for k in cal_keywords):
+        cal_summary = get_calendar_context_summary()
+        if cal_summary:
+            query_prompt = f"{query_prompt}\n\n--- [LIVE USER CALENDAR CONTEXT FOR TODAY] ---\n{cal_summary}\n--- [END CALENDAR CONTEXT] ---"
     if online:
         urls = extract_urls(prompt)
         web_contexts = []
