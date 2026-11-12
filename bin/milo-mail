@@ -509,12 +509,55 @@ def cmd_config(args):
     print(f"     GMAIL_USER=\"youremail@gmail.com\"")
     print(f"     GMAIL_APP_PASSWORD=\"abcdefghijklmnop\"\n")
     print(f"  6. Run {CYAN}milo-mail status{RESET} to test the connection.\n")
+    print(f"Or simply run {CYAN}milo-mail setup{RESET} for the interactive wizard.\n")
     print(f"{DIM}{'─' * 65}{RESET}\n")
     return 0
+
+def cmd_setup(args):
+    """Interactive CLI wizard to configure Gmail credentials without manual file editing."""
+    print(f"\n{CYAN}{BOLD}✉ MILO GMAIL QUICK SETUP WIZARD{RESET}")
+    print(f"{DIM}{'─' * 55}{RESET}")
+    print("This will save your Gmail credentials directly to ~/.config/milo/mail.env\n")
+
+    try:
+        user_input = input(f"{BOLD}1. Enter your Gmail address:{RESET} ").strip()
+        if not user_input:
+            print(f"{CRIMSON}✖ Email cannot be empty.{RESET}")
+            return 1
+
+        print(f"\n{DIM}(Google App Passwords are 16 letters, e.g. 'abcd efgh ijkl mnop'){RESET}")
+        pw_input = input(f"{BOLD}2. Enter your 16-character App Password:{RESET} ").strip()
+        if not pw_input:
+            print(f"{CRIMSON}✖ Password cannot be empty.{RESET}")
+            return 1
+
+        clean_pw = pw_input.replace(" ", "")
+
+        CONFIG_MAIL_ENV.parent.mkdir(parents=True, exist_ok=True)
+        with open(CONFIG_MAIL_ENV, "w", encoding="utf-8") as f:
+            f.write("# Milo Sovereign Gmail Configuration\n")
+            f.write(f'GMAIL_USER="{user_input}"\n')
+            f.write(f'GMAIL_APP_PASSWORD="{clean_pw}"\n')
+
+        try:
+            os.chmod(CONFIG_MAIL_ENV, 0o600)
+        except Exception:
+            pass
+
+        print(f"\n{GREEN}✔ Saved to {CONFIG_MAIL_ENV}!{RESET}")
+        print(f"{CYAN}Testing connection to imap.gmail.com...{RESET}\n")
+        args.json = False
+        return cmd_status(args)
+    except (KeyboardInterrupt, EOFError):
+        print(f"\n{YELLOW}Setup cancelled.{RESET}")
+        return 1
 
 def main():
     parser = argparse.ArgumentParser(description="Milo Sovereign Gmail & Email Engine")
     subparsers = parser.add_subparsers(dest="command")
+
+    # setup
+    subparsers.add_parser("setup", help="Interactive terminal setup wizard")
 
     # status
     p_status = subparsers.add_parser("status", help="Check inbox status & unread count")
@@ -559,6 +602,7 @@ def main():
             return cmd_config(args)
 
     cmds = {
+        "setup": cmd_setup,
         "status": cmd_status,
         "sync": cmd_sync,
         "list": cmd_list,
