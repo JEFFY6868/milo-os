@@ -130,6 +130,30 @@ class MiloDropHTTPHandler(BaseHTTPRequestHandler):
         self.send_cors_headers()
         self.end_headers()
 
+    def do_HEAD(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        if path in ("/", "/index.html"):
+            index_path = WEB_DIR / "index.html"
+            if index_path.exists():
+                content = index_path.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(content)))
+                self.send_cors_headers()
+                self.end_headers()
+            else:
+                self.send_error(404, "Not Found")
+        elif path == "/qr":
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_cors_headers()
+            self.end_headers()
+        else:
+            self.send_response(200)
+            self.send_cors_headers()
+            self.end_headers()
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
