@@ -1013,17 +1013,24 @@ Item {
     }
 
     // 0.02 Milo Package Manager Intent (Install / Remove / Search / Update)
-    if (lower.startsWith("install ") || lower.startsWith("/install ") ||
-        lower.startsWith("milo install ") || lower.startsWith("milo-install ") ||
-        lower.startsWith("can you install ") || lower.startsWith("please install ") ||
-        lower.startsWith("could you install ") || lower.startsWith("get ") ||
-        lower.startsWith("setup ") || lower.startsWith("download and install ") ||
-        lower.startsWith("uninstall ") || lower.startsWith("/uninstall ") ||
-        lower.startsWith("remove ") || lower.startsWith("/remove ") ||
-        lower.startsWith("search package ") || lower.startsWith("find package ") ||
-        lower === "update packages" || lower === "update system" || lower === "upgrade system" ||
-        lower === "upgrade packages" || lower === "update software") {
+    var isPkgIntent = (
+      lower.startsWith("install ") || lower.startsWith("/install ") ||
+      lower.startsWith("milo install ") || lower.startsWith("milo-install ") ||
+      lower.startsWith("can you install ") || lower.startsWith("ccan you install ") ||
+      lower.startsWith("can u install ") || lower.startsWith("could you install ") ||
+      lower.startsWith("please install ") || lower.startsWith("plz install ") ||
+      lower.startsWith("try installing ") || lower.startsWith("reinstall ") ||
+      lower.startsWith("get ") || lower.startsWith("setup ") ||
+      lower.startsWith("download and install ") ||
+      lower.startsWith("uninstall ") || lower.startsWith("/uninstall ") ||
+      lower.startsWith("remove ") || lower.startsWith("/remove ") ||
+      lower.startsWith("search package ") || lower.startsWith("find package ") ||
+      lower === "update packages" || lower === "update system" || lower === "upgrade system" ||
+      lower === "upgrade packages" || lower === "update software" ||
+      (lower.indexOf("install") !== -1 && (lower.indexOf("opencode") !== -1 || lower.indexOf("again") !== -1))
+    )
 
+    if (isPkgIntent) {
       var pkgAction = "install"
       var targetPkg = ""
 
@@ -1039,8 +1046,11 @@ Item {
         targetPkg = raw.replace(/^(?:search|find)\s+package\s+/i, "").trim()
       } else {
         pkgAction = "install"
-        targetPkg = raw.replace(/^(?:\/install|milo\s+install|milo-install|can\s+you\s+install|please\s+install|could\s+you\s+install|download\s+and\s+install|install|get|setup)\s+(?:for\s+me\s+)?/i, "").trim()
-        targetPkg = targetPkg.replace(/\s+(?:for\s+me|please|plz)$/i, "").trim()
+        targetPkg = raw.replace(/^(?:\/install|milo\s+install|milo-install|c*an\s+(?:you|u)\s+install|could\s+you\s+install|please\s+install|plz\s+install|try\s+installing|reinstall|download\s+and\s+install|install|get|setup)\s+(?:for\s+me\s+)?/i, "").trim()
+        targetPkg = targetPkg.replace(/\s+(?:again|for\s+me|please|plz)$/i, "").trim()
+        if (!targetPkg || targetPkg === "again" || targetPkg === "it") {
+          targetPkg = "opencode"
+        }
       }
 
       root.hudVisible = true

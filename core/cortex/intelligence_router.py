@@ -842,12 +842,104 @@ def handle_mail_intent(prompt: str) -> Optional[Tuple[str, str]]:
     return None
 
 
+def handle_pkg_intent(prompt: str) -> Optional[Tuple[str, str]]:
+    """Detect and handle package install/remove/update requests."""
+    p_lower = prompt.lower().strip()
+
+    is_install = any(k in p_lower for k in [
+        "install ", "installing", "reinstall", "setup ", "get ", "download and install"
+    ]) or p_lower.startswith("install") or p_lower.startswith("milo install")
+
+    is_remove = any(k in p_lower for k in [
+        "uninstall", "remove ", "delete package"
+    ]) or p_lower.startswith("uninstall") or p_lower.startswith("remove")
+
+    is_update = any(k in p_lower for k in [
+        "update system", "update packages", "upgrade system", "upgrade packages"
+    ])
+
+    if not (is_install or is_remove or is_update):
+        return None
+
+    milo_pkg_bin = Path.home() / ".local" / "bin" / "milo-pkg"
+    if not milo_pkg_bin.exists():
+        milo_pkg_bin = Path.home() / "Projects" / "milo-os" / "bin" / "milo-pkg"
+
+    if is_update:
+        try:
+            subprocess.Popen([
+                "foot", "-a", "milo-floating", "-T", "MILO // System Package Upgrade",
+                str(milo_pkg_bin), "update"
+            ])
+            return "📦 **[MILO PACKAGE MANAGER ACTIVE]**\n\n✦ Launching system upgrade console via pacman & AUR...", "Milo Package Copilot"
+        except Exception as e:
+            return f"Failed to launch package updater: {e}", "Milo Package Copilot"
+
+    target = ""
+    if is_remove:
+        action = "remove"
+        target = re.sub(r'^(?:milo\s+)?(?:uninstall|remove|delete)\s+(?:package\s+)?', '', prompt, flags=re.IGNORECASE).strip()
+    else:
+        action = "install"
+        target = re.sub(r'^(?:milo\s+)?(?:c*an\s+(?:you|u)\s+)?(?:could\s+you\s+)?(?:please\s+|plz\s+)?(?:try\s+)?(?:install|installing|reinstall|setup|get|download\s+and\s+install)\s+(?:again\s+)?(?:for\s+me\s+)?', '', prompt, flags=re.IGNORECASE).strip()
+        target = re.sub(r'\s+(?:again|for\s+me|please|plz)$', '', target, flags=re.IGNORECASE).strip()
+
+    # If target is fuzzy or generic, check known target names
+    if not target or target in ["it", "this", "app", "application", "again"]:
+        for known in ["opencode", "discord", "telegram", "vlc", "steam", "spotify", "gimp", "obs"]:
+            if known in p_lower:
+                target = known
+                break
+        if not target or target in ["it", "this", "app", "application", "again"]:
+            from datetime import timedelta
+            for days_ago in [0, 1]:
+                check_date = (datetime.now() - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+                for note_path in [
+                    Path.home() / "Documents" / "Obsidian" / "Milo" / "Daily" / f"{check_date}.md",
+                    Path.home() / "MiloNotes" / "Daily" / f"{check_date}.md"
+                ]:
+                    if note_path.exists():
+                        try:
+                            txt = note_path.read_text(encoding="utf-8").lower()
+                            for known in ["opencode", "discord", "telegram", "vlc", "steam", "spotify", "gimp", "obs"]:
+                                if known in txt:
+                                    target = known
+                                    break
+                        except Exception:
+                            pass
+                    if target and target not in ["it", "this", "app", "application", "again"]:
+                        break
+                if target and target not in ["it", "this", "app", "application", "again"]:
+                    break
+
+    if not target or target in ["it", "this", "app", "application", "again"]:
+        return None
+
+    target = target.strip("'\"`.,!? ")
+
+    try:
+        title = f"MILO // {'Install' if action == 'install' else 'Remove'} {target}"
+        subprocess.Popen([
+            "foot", "-a", "milo-floating", "-T", title,
+            str(milo_pkg_bin), action, target
+        ])
+        verb = "installation" if action == "install" else "removal"
+        return f"📦 **[MILO PACKAGE MANAGER ACTIVE]**\n\n✦ Target: `{target}`\n✦ Resolving repository & spawning {verb} console...", "Milo Package Copilot"
+    except Exception as e:
+        return f"Failed to spawn package manager: {e}", "Milo Package Copilot"
+
+
 def execute_hybrid_query(prompt: str) -> Tuple[str, str]:
     """
     Execute query using current intelligence mode and automatic failover.
     Returns: (response_text, provider_name)
     """
-    # 0. Check task-specific intent first
+    # 0. Check package manager intent first
+    pkg_res = handle_pkg_intent(prompt)
+    if pkg_res:
+        return pkg_res
+
+    # 0.1 Check task-specific intent
     task_res = handle_task_intent(prompt)
     if task_res:
         return task_res
