@@ -459,6 +459,12 @@
   </div>
 
   <script>
+    // The server sets an HttpOnly pairing cookie on first load; drop the token
+    // from the address bar so it does not linger in browser history.
+    if (location.search.includes('t=')) {
+      history.replaceState(null, '', location.pathname);
+    }
+
     let selectedFiles = [];
 
     function switchTab(tab) {

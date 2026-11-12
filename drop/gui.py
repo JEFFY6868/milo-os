@@ -24,7 +24,10 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QSize
 from PyQt6.QtGui import QFont, QIcon, QPixmap, QColor, QPainter, QBrush, QPen
 
-from server import PORT, DOWNLOADS_DIR, get_local_ip, start_server_daemon, transfer_history, history_lock
+from server import (
+    PORT, DOWNLOADS_DIR, DROP_TOKEN, get_local_ip, start_server_daemon,
+    transfer_history, history_lock,
+)
 
 CYBER_STYLE = """
 QMainWindow {
@@ -303,6 +306,7 @@ class MiloDropWindow(QMainWindow):
         self.selected_files = []
         self.server_ip = get_local_ip()
         self.server_url = f"http://{self.server_ip}:{PORT}"
+        self.pair_url = f"{self.server_url}/?t={DROP_TOKEN}"
         self.wifi_ssid = get_wifi_ssid()
 
         # Ensure server runs
@@ -482,7 +486,7 @@ class MiloDropWindow(QMainWindow):
         """Generate and display QR code pixmap."""
         try:
             p = subprocess.Popen(
-                ["qrencode", "-s", "6", "-m", "1", "-o", "-", self.server_url],
+                ["qrencode", "-s", "6", "-m", "1", "-o", "-", self.pair_url],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
             data, _ = p.communicate()
@@ -495,6 +499,7 @@ class MiloDropWindow(QMainWindow):
     def refresh_network_ip(self):
         self.server_ip = get_local_ip()
         self.server_url = f"http://{self.server_ip}:{PORT}"
+        self.pair_url = f"{self.server_url}/?t={DROP_TOKEN}"
         self.wifi_ssid = get_wifi_ssid()
         self.ip_badge.setText(f"● {self.server_url}")
         self.url_display.setText(self.server_url)
@@ -828,13 +833,13 @@ class MiloDropWindow(QMainWindow):
     def copy_server_url(self):
         try:
             p = subprocess.Popen(["wl-copy"], stdin=subprocess.PIPE)
-            p.communicate(self.server_url.encode("utf-8"))
+            p.communicate(self.pair_url.encode("utf-8"))
             self.statusBar_msg("Copied URL to clipboard!")
         except Exception:
             pass
 
     def open_browser(self):
-        subprocess.Popen(["xdg-open", self.server_url])
+        subprocess.Popen(["xdg-open", self.pair_url])
 
     def open_downloads_folder(self):
         subprocess.Popen(["xdg-open", str(DOWNLOADS_DIR)])

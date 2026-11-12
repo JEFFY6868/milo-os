@@ -11,10 +11,13 @@ Handles:
 """
 
 import os
+import re
 import sys
 import json
 import time
+import hmac
 import socket
+import secrets
 import threading
 import subprocess
 from pathlib import Path
@@ -22,6 +25,37 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import urllib.parse
 
 PORT = 4242
+COOKIE_NAME = "milo_drop_token"
+TOKEN_FILE = Path.home() / ".config" / "milo" / "drop.token"
+
+
+def load_or_create_token() -> str:
+    """Return the shared pairing token, creating it 0600 on first run.
+
+    Fails closed: if the token cannot be persisted, an ephemeral token is used
+    so the server never comes up unauthenticated.
+    """
+    env_token = os.environ.get("MILO_DROP_TOKEN", "").strip()
+    if env_token:
+        return env_token
+    try:
+        TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        if TOKEN_FILE.exists():
+            existing = TOKEN_FILE.read_text(encoding="utf-8").strip()
+            if existing:
+                os.chmod(TOKEN_FILE, 0o600)
+                return existing
+        token = secrets.token_urlsafe(24)
+        fd = os.open(TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(token + "\n")
+        return token
+    except Exception as e:
+        sys.stderr.write(f"[MiloDrop] Cannot persist pairing token ({e}); using ephemeral token.\n")
+        return secrets.token_urlsafe(24)
+
+
+DROP_TOKEN = load_or_create_token()
 def get_downloads_dir() -> Path:
     """Return ~/Downloads or /tmp/Downloads if ~/Downloads is not writable."""
     candidate = Path.home() / "Downloads"
@@ -117,21 +151,73 @@ def get_unique_filepath(target_dir: Path, filename: str) -> Path:
 
 class MiloDropHTTPHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
-        # Clean logging
-        sys.stderr.write(f"[MiloDrop Server] {args[0]} - {args[1]}\n")
+        # Clean logging. Redact pairing tokens so they never reach the journal.
+        message = format % args
+        message = re.sub(r"([?&]t=)[^&\s\"]+", r"\1<redacted>", message)
+        sys.stderr.write(f"[MiloDrop Server] {message}\n")
 
-    def send_cors_headers(self):
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+    def send_security_headers(self):
+        # Same-origin only: never advertise a wildcard origin to the LAN.
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        if getattr(self, "_issue_cookie", False):
+            self.send_header(
+                "Set-Cookie",
+                f"{COOKIE_NAME}={DROP_TOKEN}; HttpOnly; SameSite=Strict; "
+                "Path=/; Max-Age=31536000",
+            )
+
+    def _supplied_token(self, parsed):
+        """Extract a token from the header, query string, or cookie."""
+        header = (self.headers.get("X-Milo-Drop-Token") or "").strip()
+        if header:
+            return header, "header"
+        query = urllib.parse.parse_qs(parsed.query)
+        if query.get("t"):
+            return query["t"][0].strip(), "query"
+        for part in (self.headers.get("Cookie") or "").split(";"):
+            name, _, value = part.strip().partition("=")
+            if name == COOKIE_NAME and value:
+                return value.strip(), "cookie"
+        return "", ""
+
+    def _guard(self):
+        """Authenticate the request. Returns the parsed URL, or None after 401."""
+        parsed = urllib.parse.urlparse(self.path)
+        supplied, source = self._supplied_token(parsed)
+        if supplied and hmac.compare_digest(supplied, DROP_TOKEN):
+            # A token arriving via URL/header is promoted to a SameSite cookie so
+            # the existing portal JS keeps working without embedding secrets.
+            self._issue_cookie = source in ("query", "header")
+            return parsed
+
+        body = (
+            "<!doctype html><meta charset=utf-8><title>Milo Drop</title>"
+            "<body style='font-family:system-ui;background:#0b0b0f;color:#e8e8ef;"
+            "display:grid;place-items:center;height:100vh;margin:0'>"
+            "<div style='text-align:center;max-width:34rem'>"
+            "<h1>🔒 Pairing required</h1>"
+            "<p>Open Milo Drop on your desktop and scan the QR code, or append "
+            "<code>?t=&lt;token&gt;</code> to this URL.</p></div>"
+        ).encode("utf-8")
+        self.send_response(401)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("WWW-Authenticate", 'MiloDrop realm="Milo Drop"')
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+        return None
 
     def do_OPTIONS(self):
-        self.send_response(200)
-        self.send_cors_headers()
+        self.send_response(204)
+        self.send_header("Allow", "GET, POST, HEAD, OPTIONS")
         self.end_headers()
 
     def do_HEAD(self):
-        parsed = urllib.parse.urlparse(self.path)
+        parsed = self._guard()
+        if parsed is None:
+            return
         path = parsed.path
         if path in ("/", "/index.html"):
             index_path = WEB_DIR / "index.html"
@@ -140,22 +226,24 @@ class MiloDropHTTPHandler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(content)))
-                self.send_cors_headers()
+                self.send_security_headers()
                 self.end_headers()
             else:
                 self.send_error(404, "Not Found")
         elif path == "/qr":
             self.send_response(200)
             self.send_header("Content-Type", "image/png")
-            self.send_cors_headers()
+            self.send_security_headers()
             self.end_headers()
         else:
             self.send_response(200)
-            self.send_cors_headers()
+            self.send_security_headers()
             self.end_headers()
 
     def do_GET(self):
-        parsed = urllib.parse.urlparse(self.path)
+        parsed = self._guard()
+        if parsed is None:
+            return
         path = parsed.path
 
         if path in ("/", "/index.html"):
@@ -165,7 +253,7 @@ class MiloDropHTTPHandler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(content)))
-                self.send_cors_headers()
+                self.send_security_headers()
                 self.end_headers()
                 self.wfile.write(content)
             else:
@@ -173,7 +261,7 @@ class MiloDropHTTPHandler(BaseHTTPRequestHandler):
 
         elif path == "/qr":
             ip = get_local_ip()
-            url = f"http://{ip}:{PORT}"
+            url = f"http://{ip}:{PORT}/?t={DROP_TOKEN}"
             try:
                 # Generate QR code using qrencode into png stream
                 p = subprocess.Popen(
@@ -184,7 +272,7 @@ class MiloDropHTTPHandler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", "image/png")
                 self.send_header("Content-Length", str(len(qr_bytes)))
-                self.send_cors_headers()
+                self.send_security_headers()
                 self.end_headers()
                 self.wfile.write(qr_bytes)
             except Exception as e:
@@ -211,7 +299,7 @@ class MiloDropHTTPHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(data)))
-            self.send_cors_headers()
+            self.send_security_headers()
             self.end_headers()
             self.wfile.write(data)
 
@@ -225,7 +313,7 @@ class MiloDropHTTPHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Type", "application/octet-stream")
                 self.send_header("Content-Disposition", f'attachment; filename="{target_path.name}"')
                 self.send_header("Content-Length", str(file_size))
-                self.send_cors_headers()
+                self.send_security_headers()
                 self.end_headers()
                 with open(target_path, "rb") as f:
                     while chunk := f.read(65536):
@@ -247,7 +335,7 @@ class MiloDropHTTPHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(data)))
-            self.send_cors_headers()
+            self.send_security_headers()
             self.end_headers()
             self.wfile.write(data)
 
@@ -261,7 +349,7 @@ class MiloDropHTTPHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(data)))
-            self.send_cors_headers()
+            self.send_security_headers()
             self.end_headers()
             self.wfile.write(data)
 
@@ -269,7 +357,9 @@ class MiloDropHTTPHandler(BaseHTTPRequestHandler):
             self.send_error(404, "Not Found")
 
     def do_POST(self):
-        parsed = urllib.parse.urlparse(self.path)
+        parsed = self._guard()
+        if parsed is None:
+            return
         path = parsed.path
 
         if path == "/clipboard":
@@ -298,7 +388,7 @@ class MiloDropHTTPHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(res)))
-            self.send_cors_headers()
+            self.send_security_headers()
             self.end_headers()
             self.wfile.write(res)
 
@@ -415,7 +505,7 @@ class MiloDropHTTPHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(res)))
-            self.send_cors_headers()
+            self.send_security_headers()
             self.end_headers()
             self.wfile.write(res)
 
@@ -484,8 +574,9 @@ if __name__ == "__main__":
     ip = get_local_ip()
     print("=" * 60)
     print(f"🚀 MILO DROP UNIVERSAL SERVER ACTIVE")
-    print(f"📍 Local Web Portal:  http://{ip}:{PORT}")
+    print(f"📍 Pairing URL:       http://{ip}:{PORT}/?t={DROP_TOKEN}")
     print(f"📥 Downloads Folder:  {DOWNLOADS_DIR}")
+    print(f"🔑 Token file:        {TOKEN_FILE} (0600)")
     print("=" * 60)
     
     server = start_server_daemon(PORT)
