@@ -1,0 +1,1900 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Milo OS // Tactical Quick Settings (Option B Demo)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700;800&family=Orbitron:wght@500;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-void: #050103;
+      --bg-panel: rgba(14, 5, 9, 0.78);
+      --bg-panel-solid: #0d0407;
+      --bg-card: rgba(26, 8, 15, 0.65);
+      --bg-card-hover: rgba(45, 12, 25, 0.85);
+      --border-dim: rgba(255, 8, 56, 0.22);
+      --border-bright: rgba(255, 8, 56, 0.85);
+      --accent-red: #ff0838;
+      --accent-magenta: #ff2a55;
+      --accent-cyan: #00f0ff;
+      --accent-green: #00ff88;
+      --accent-amber: #ffaa00;
+      --text-main: #f8f9fa;
+      --text-muted: #8e8086;
+      --text-dim: #54454b;
+      --glow-red: 0 0 25px rgba(255, 8, 56, 0.45);
+      --glow-cyan: 0 0 25px rgba(0, 240, 255, 0.35);
+      --glow-green: 0 0 20px rgba(0, 255, 136, 0.4);
+      --radius-sm: 6px;
+      --radius-md: 12px;
+      --radius-lg: 18px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    body {
+      background-color: var(--bg-void);
+      color: var(--text-main);
+      font-family: 'JetBrains Mono', monospace;
+      min-height: 100vh;
+      overflow-x: hidden;
+      overflow-y: auto;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      perspective: 1200px;
+    }
+
+    /* Screen Dimmer / Night Light Layer */
+    #nightLightFilter {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9999;
+      background: rgba(255, 140, 40, 0);
+      mix-blend-mode: multiply;
+      transition: background 0.3s ease;
+    }
+
+    #brightnessFilter {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9998;
+      background: rgba(0, 0, 0, 0.15);
+      transition: background 0.15s ease;
+    }
+
+    /* Simulated Desktop Background */
+    .desktop-bg {
+      position: fixed;
+      inset: 0;
+      background: url('assets/bg.jpg') center center / cover no-repeat,
+                  radial-gradient(circle at 50% 50%, #150308 0%, #050103 100%);
+      filter: brightness(0.65) saturate(1.2);
+      z-index: 0;
+      transition: filter 0.4s ease;
+    }
+
+    .desktop-bg::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: 
+        linear-gradient(rgba(255, 8, 56, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 8, 56, 0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+    }
+
+    /* Ambient Game Mode Alert Glow */
+    .game-mode-pulse {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 10;
+      box-shadow: inset 0 0 100px rgba(255, 8, 56, 0.35);
+      opacity: 0;
+      transition: opacity 0.5s ease;
+      animation: alertPulse 2.5s infinite ease-in-out;
+    }
+
+    @keyframes alertPulse {
+      0%, 100% { opacity: 0.2; }
+      50% { opacity: 0.65; }
+    }
+
+    /* Top Desktop Header (Mimicking real Milo Header) */
+    .milo-top-banner {
+      position: relative;
+      z-index: 50;
+      width: 100%;
+      height: 48px;
+      background: rgba(8, 2, 4, 0.88);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border-dim);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 28px;
+      font-size: 12px;
+      letter-spacing: 1px;
+    }
+
+    .milo-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-family: 'Orbitron', sans-serif;
+      font-weight: 700;
+      color: var(--accent-red);
+      text-shadow: var(--glow-red);
+    }
+
+    .milo-brand span.sub {
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 400;
+      letter-spacing: 0.5px;
+    }
+
+    .milo-telemetry {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .telemetry-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .telemetry-item b {
+      color: var(--text-main);
+      font-weight: 600;
+    }
+
+    .badge-bar-state {
+      padding: 3px 10px;
+      border-radius: var(--radius-sm);
+      background: rgba(255, 8, 56, 0.15);
+      border: 1px solid var(--border-dim);
+      color: var(--accent-magenta);
+      font-size: 10px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .badge-bar-state:hover {
+      background: rgba(255, 8, 56, 0.3);
+      border-color: var(--accent-red);
+      color: #fff;
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent-green);
+      box-shadow: var(--glow-green);
+      display: inline-block;
+    }
+
+    .status-dot.red {
+      background: var(--accent-red);
+      box-shadow: var(--glow-red);
+    }
+
+    /* Floating Action Trigger (Summon Option B) */
+    .summon-dock {
+      position: relative;
+      z-index: 60;
+      margin-top: 18px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      background: rgba(18, 5, 11, 0.85);
+      backdrop-filter: blur(20px);
+      padding: 8px 20px;
+      border-radius: 40px;
+      border: 1px solid var(--border-dim);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+    }
+
+    .summon-dock span {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .btn-tactical-pill {
+      background: linear-gradient(135deg, rgba(255, 8, 56, 0.25), rgba(255, 42, 85, 0.15));
+      border: 1px solid var(--accent-red);
+      color: #fff;
+      padding: 6px 16px;
+      border-radius: 30px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+      box-shadow: var(--glow-red);
+    }
+
+    .btn-tactical-pill:hover {
+      transform: translateY(-2px);
+      background: linear-gradient(135deg, rgba(255, 8, 56, 0.5), rgba(255, 42, 85, 0.3));
+      box-shadow: 0 0 30px rgba(255, 8, 56, 0.7);
+    }
+
+    .btn-tactical-pill:active {
+      transform: translateY(1px);
+    }
+
+    .audio-toggle-btn {
+      background: transparent;
+      border: 1px solid var(--border-dim);
+      color: var(--text-muted);
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .audio-toggle-btn:hover {
+      color: var(--accent-cyan);
+      border-color: var(--accent-cyan);
+    }
+
+    /* MAIN CONTAINER: Option B Tactical Control Capsule */
+    .capsule-wrapper {
+      position: relative;
+      z-index: 100;
+      margin: 28px 0 60px 0;
+      width: 95%;
+      max-width: 920px;
+      transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease;
+      transform-style: preserve-3d;
+    }
+
+    .tactical-capsule {
+      background: var(--bg-panel);
+      backdrop-filter: blur(28px) saturate(180%);
+      -webkit-backdrop-filter: blur(28px) saturate(180%);
+      border: 1px solid var(--border-dim);
+      border-radius: var(--radius-lg);
+      padding: 26px;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.85),
+                  inset 0 1px 0 rgba(255, 255, 255, 0.08),
+                  0 0 40px rgba(255, 8, 56, 0.12);
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .tactical-capsule::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent 5%, var(--accent-red) 50%, transparent 95%);
+      box-shadow: var(--glow-red);
+    }
+
+    /* Corner Sci-Fi Brackets */
+    .bracket-tl, .bracket-tr, .bracket-bl, .bracket-br {
+      position: absolute;
+      width: 14px;
+      height: 14px;
+      pointer-events: none;
+      border-color: var(--accent-red);
+      opacity: 0.7;
+    }
+    .bracket-tl { top: 8px; left: 8px; border-top: 2px solid; border-left: 2px solid; }
+    .bracket-tr { top: 8px; right: 8px; border-top: 2px solid; border-right: 2px solid; }
+    .bracket-bl { bottom: 8px; left: 8px; border-bottom: 2px solid; border-left: 2px solid; }
+    .bracket-br { bottom: 8px; right: 8px; border-bottom: 2px solid; border-right: 2px solid; }
+
+    /* Capsule Header */
+    .capsule-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid rgba(255, 8, 56, 0.15);
+    }
+
+    .capsule-title-block {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .capsule-title {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 16px;
+      font-weight: 800;
+      letter-spacing: 2px;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .capsule-title .tag {
+      font-size: 10px;
+      background: var(--accent-red);
+      color: #000;
+      font-weight: 900;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .capsule-subtitle {
+      font-size: 11px;
+      color: var(--text-muted);
+      letter-spacing: 0.5px;
+    }
+
+    .capsule-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .hotkey-indicator {
+      font-size: 10px;
+      color: var(--text-dim);
+      border: 1px solid rgba(255,255,255,0.1);
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: rgba(0,0,0,0.4);
+    }
+
+    .close-btn {
+      width: 32px;
+      height: 32px;
+      background: rgba(255, 8, 56, 0.1);
+      border: 1px solid var(--border-dim);
+      border-radius: 50%;
+      color: var(--accent-red);
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+
+    .close-btn:hover {
+      background: var(--accent-red);
+      color: #000;
+      box-shadow: var(--glow-red);
+      transform: rotate(90deg);
+    }
+
+    /* SECTION 1: PRIMARY SLIDERS (Brightness & Master Volume) */
+    .sliders-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 22px;
+    }
+
+    @media (max-width: 768px) {
+      .sliders-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .slider-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-dim);
+      border-radius: var(--radius-md);
+      padding: 18px 20px;
+      position: relative;
+      transition: all 0.25s ease;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .slider-card:hover {
+      border-color: rgba(255, 8, 56, 0.45);
+      background: var(--bg-card-hover);
+      box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4);
+    }
+
+    .slider-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .slider-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .slider-title svg {
+      width: 18px;
+      height: 18px;
+      stroke: var(--accent-red);
+    }
+
+    .slider-value-badge {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 14px;
+      font-weight: 800;
+      color: var(--accent-red);
+      text-shadow: 0 0 10px rgba(255, 8, 56, 0.5);
+      background: rgba(255, 8, 56, 0.1);
+      padding: 3px 10px;
+      border-radius: var(--radius-sm);
+      border: 1px solid rgba(255, 8, 56, 0.3);
+    }
+
+    .slider-sub-telemetry {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: -8px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    /* Custom Futuristic Track & Thumb */
+    .range-container {
+      position: relative;
+      width: 100%;
+      height: 28px;
+      display: flex;
+      align-items: center;
+    }
+
+    input[type=range] {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 10px;
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 5px;
+      outline: none;
+      cursor: pointer;
+      position: relative;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #ffffff;
+      border: 3px solid var(--accent-red);
+      box-shadow: 0 0 15px var(--accent-red), 0 0 30px var(--accent-red);
+      cursor: pointer;
+      transition: transform 0.1s, box-shadow 0.2s;
+    }
+
+    input[type=range]::-webkit-slider-thumb:hover {
+      transform: scale(1.2);
+      box-shadow: 0 0 25px var(--accent-magenta), 0 0 45px var(--accent-red);
+    }
+
+    input[type=range]:active::-webkit-slider-thumb {
+      transform: scale(1.3);
+      background: var(--accent-cyan);
+      border-color: #fff;
+    }
+
+    /* Audio Equalizer Canvas Inside Sound Card */
+    .eq-canvas-container {
+      height: 22px;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 3px;
+    }
+
+    .eq-bar {
+      flex: 1;
+      height: 4px;
+      background: rgba(255, 8, 56, 0.25);
+      border-radius: 2px;
+      transition: height 0.08s ease, background 0.1s;
+    }
+
+    .slider-card:hover .eq-bar {
+      background: rgba(255, 8, 56, 0.6);
+    }
+
+    /* Quick Preset Buttons */
+    .slider-chips {
+      display: flex;
+      gap: 8px;
+    }
+
+    .chip-btn {
+      flex: 1;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: var(--text-muted);
+      font-size: 10px;
+      padding: 5px 0;
+      text-align: center;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all 0.2s;
+      font-weight: 600;
+    }
+
+    .chip-btn:hover {
+      background: rgba(255, 8, 56, 0.15);
+      border-color: var(--border-dim);
+      color: #fff;
+    }
+
+    .chip-btn.active {
+      background: rgba(255, 8, 56, 0.25);
+      border-color: var(--accent-red);
+      color: var(--accent-red);
+      font-weight: 700;
+    }
+
+    /* Output Sink Dropdown / Pill */
+    .audio-sink-pill {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 6px 12px;
+      border-radius: var(--radius-sm);
+      font-size: 11px;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .audio-sink-pill:hover {
+      border-color: var(--accent-cyan);
+      color: var(--text-main);
+    }
+
+    /* SECTION 2: CONNECTIVITY (Wi-Fi & Bluetooth) */
+    .connectivity-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 22px;
+    }
+
+    @media (max-width: 768px) {
+      .connectivity-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .connect-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-dim);
+      border-radius: var(--radius-md);
+      padding: 18px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      position: relative;
+      transition: all 0.25s ease;
+    }
+
+    .connect-card:hover {
+      border-color: rgba(255, 8, 56, 0.45);
+      background: var(--bg-card-hover);
+    }
+
+    .connect-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .connect-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .connect-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: var(--radius-sm);
+      background: rgba(255, 8, 56, 0.12);
+      border: 1px solid var(--border-dim);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent-red);
+      transition: all 0.2s ease;
+    }
+
+    .connect-icon.active {
+      background: rgba(0, 240, 255, 0.15);
+      border-color: var(--accent-cyan);
+      color: var(--accent-cyan);
+      box-shadow: var(--glow-cyan);
+    }
+
+    .connect-texts {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .connect-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .connect-subtitle {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* Toggle Switch */
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 44px;
+      height: 24px;
+      flex-shrink: 0;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .switch-slider {
+      position: absolute;
+      cursor: pointer;
+      inset: 0;
+      background-color: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      transition: .25s cubic-bezier(0.4, 0, 0.2, 1);
+      border-radius: 24px;
+    }
+
+    .switch-slider:before {
+      position: absolute;
+      content: "";
+      height: 16px;
+      width: 16px;
+      left: 3px;
+      bottom: 3px;
+      background-color: var(--text-muted);
+      transition: .25s cubic-bezier(0.4, 0, 0.2, 1);
+      border-radius: 50%;
+    }
+
+    input:checked + .switch-slider {
+      background-color: rgba(255, 8, 56, 0.35);
+      border-color: var(--accent-red);
+      box-shadow: 0 0 15px rgba(255, 8, 56, 0.5);
+    }
+
+    input:checked + .switch-slider:before {
+      transform: translateX(20px);
+      background-color: #fff;
+      box-shadow: 0 0 10px #fff;
+    }
+
+    .switch.cyan input:checked + .switch-slider {
+      background-color: rgba(0, 240, 255, 0.35);
+      border-color: var(--accent-cyan);
+      box-shadow: 0 0 15px rgba(0, 240, 255, 0.4);
+    }
+
+    /* Connectivity Details Drawer */
+    .connect-drawer {
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: var(--radius-sm);
+      padding: 10px 14px;
+      font-size: 11px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .connect-drawer-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--text-muted);
+    }
+
+    .connect-drawer-row b {
+      color: var(--text-main);
+    }
+
+    .signal-bars {
+      display: flex;
+      align-items: flex-end;
+      gap: 3px;
+      height: 12px;
+    }
+
+    .signal-bar {
+      width: 3px;
+      background: var(--text-dim);
+      border-radius: 1px;
+    }
+
+    .signal-bar.on {
+      background: var(--accent-green);
+      box-shadow: 0 0 6px var(--accent-green);
+    }
+
+    .battery-pill {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      background: rgba(0, 255, 136, 0.15);
+      border: 1px solid var(--accent-green);
+      color: var(--accent-green);
+    }
+
+    .drawer-action-btn {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: var(--accent-cyan);
+      padding: 5px 10px;
+      border-radius: var(--radius-sm);
+      font-size: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      align-self: flex-start;
+      margin-top: 4px;
+      transition: all 0.2s;
+    }
+
+    .drawer-action-btn:hover {
+      background: rgba(0, 240, 255, 0.15);
+      border-color: var(--accent-cyan);
+    }
+
+    /* SECTION 3: TACTICAL QUICK ACTION MATRIX */
+    .matrix-title {
+      font-size: 11px;
+      color: var(--text-muted);
+      letter-spacing: 1px;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .matrix-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-bottom: 22px;
+    }
+
+    @media (max-width: 768px) {
+      .matrix-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    .matrix-tile {
+      background: var(--bg-card);
+      border: 1px solid var(--border-dim);
+      border-radius: var(--radius-md);
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 95px;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+
+    .matrix-tile:hover {
+      border-color: rgba(255, 8, 56, 0.5);
+      background: var(--bg-card-hover);
+      transform: translateY(-2px);
+    }
+
+    .matrix-tile.active {
+      background: rgba(255, 8, 56, 0.18);
+      border-color: var(--accent-red);
+      box-shadow: 0 0 20px rgba(255, 8, 56, 0.3);
+    }
+
+    .matrix-tile.active.green {
+      background: rgba(0, 255, 136, 0.15);
+      border-color: var(--accent-green);
+      box-shadow: 0 0 20px rgba(0, 255, 136, 0.25);
+    }
+
+    .matrix-tile.active.amber {
+      background: rgba(255, 170, 0, 0.18);
+      border-color: var(--accent-amber);
+      box-shadow: 0 0 20px rgba(255, 170, 0, 0.3);
+    }
+
+    .tile-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .tile-icon {
+      font-size: 20px;
+    }
+
+    .tile-status {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--text-dim);
+      transition: all 0.2s;
+    }
+
+    .matrix-tile.active .tile-status {
+      background: var(--accent-red);
+      box-shadow: var(--glow-red);
+    }
+
+    .matrix-tile.active.green .tile-status {
+      background: var(--accent-green);
+      box-shadow: var(--glow-green);
+    }
+
+    .matrix-tile.active.amber .tile-status {
+      background: var(--accent-amber);
+      box-shadow: 0 0 10px var(--accent-amber);
+    }
+
+    .tile-bottom {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .tile-name {
+      font-size: 11px;
+      font-weight: 700;
+      color: #fff;
+      white-space: nowrap;
+      letter-spacing: 0.5px;
+    }
+
+    .tile-desc {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    /* SECTION 4: DIAGNOSTIC & FOOTER STRIP */
+    .capsule-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-top: 16px;
+      border-top: 1px solid rgba(255, 8, 56, 0.15);
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    .footer-left {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .footer-left span b {
+      color: var(--accent-red);
+    }
+
+    .footer-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .key-badge {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #fff;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-weight: 700;
+    }
+
+    /* Toast Notification */
+    #tacticalToast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: rgba(18, 5, 11, 0.95);
+      border: 1px solid var(--accent-red);
+      box-shadow: var(--glow-red), 0 10px 30px rgba(0,0,0,0.8);
+      border-radius: var(--radius-sm);
+      padding: 12px 18px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      z-index: 10000;
+      transform: translateY(120px);
+      opacity: 0;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      font-size: 12px;
+    }
+
+    #tacticalToast.show {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    #tacticalToast .toast-icon {
+      font-size: 16px;
+      color: var(--accent-red);
+    }
+
+    /* Network Modal Scanner Simulation */
+    .scanner-modal {
+      position: absolute;
+      inset: 0;
+      background: rgba(8, 2, 4, 0.95);
+      backdrop-filter: blur(20px);
+      border-radius: var(--radius-lg);
+      z-index: 200;
+      display: none;
+      flex-direction: column;
+      padding: 24px;
+    }
+
+    .scanner-modal.open {
+      display: flex;
+    }
+
+    .scanner-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      border-bottom: 1px solid var(--border-dim);
+      padding-bottom: 12px;
+    }
+
+    .scanner-title {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 14px;
+      color: var(--accent-cyan);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .network-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      overflow-y: auto;
+      max-height: 380px;
+    }
+
+    .net-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--radius-sm);
+      padding: 12px 16px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .net-item:hover {
+      background: rgba(0, 240, 255, 0.1);
+      border-color: var(--accent-cyan);
+    }
+
+    .net-name {
+      font-size: 12px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .net-meta {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    .net-connect-btn {
+      background: var(--accent-cyan);
+      color: #000;
+      border: none;
+      padding: 4px 12px;
+      border-radius: var(--radius-sm);
+      font-size: 10px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Screen Tint Filter Elements -->
+  <div id="nightLightFilter"></div>
+  <div id="brightnessFilter"></div>
+  <div class="game-mode-pulse" id="gameModePulse"></div>
+
+  <!-- Background Wallpaper -->
+  <div class="desktop-bg"></div>
+
+  <!-- Simulated Milo Desktop Top Banner -->
+  <header class="milo-top-banner">
+    <div class="milo-brand">
+      <span>✦ MILO TACTICAL OS</span>
+      <span class="sub">// ARCH-HYPRLAND 240Hz</span>
+    </div>
+
+    <div class="milo-telemetry">
+      <div class="telemetry-item">
+        <span class="status-dot"></span>
+        <span>SENTINEL: <b>ACTIVE</b></span>
+      </div>
+      <div class="telemetry-item">
+        <span>CPU: <b id="topCpu">19%</b></span>
+      </div>
+      <div class="telemetry-item">
+        <span>MEM: <b id="topMem">6.8 / 32 GB</b></span>
+      </div>
+      <div class="telemetry-item">
+        <span>BAT: <b id="topBat">94% AC</b></span>
+      </div>
+      <div class="telemetry-item">
+        <span id="topClock">19:55:00</span>
+      </div>
+      <div class="badge-bar-state" id="omarchyBarStateBadge" onclick="toggleOmarchyTopBarSimulation()" title="Click to simulate toggling Omarchy top bar">
+        <span class="status-dot red" id="barDot"></span>
+        <span id="barText">OMARCHY TOP BAR: DISABLED</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Interactive Summon Strip -->
+  <div class="summon-dock">
+    <span>💡 OPTION B PREVIEW</span>
+    <button class="btn-tactical-pill" onclick="toggleCapsuleVisibility()">
+      <span>⚙ TOGGLE QUICK SETTINGS</span>
+      <span style="opacity:0.6;">[SUPER + S]</span>
+    </button>
+    <button class="audio-toggle-btn" id="sfxToggleBtn" onclick="toggleSFX()">
+      🔊 SFX: ON
+    </button>
+  </div>
+
+  <!-- THE OPTION B CAPSULE -->
+  <main class="capsule-wrapper" id="capsuleWrapper">
+    <div class="tactical-capsule" id="tacticalCapsule">
+      
+      <!-- Sci-Fi Corner Brackets -->
+      <div class="bracket-tl"></div>
+      <div class="bracket-tr"></div>
+      <div class="bracket-bl"></div>
+      <div class="bracket-br"></div>
+
+      <!-- Capsule Header -->
+      <div class="capsule-header">
+        <div class="capsule-title-block">
+          <div class="capsule-title">
+            <span>TACTICAL CONTROL CENTER</span>
+            <span class="tag">OPTION B</span>
+          </div>
+          <div class="capsule-subtitle">
+            Unified Hardware Rack & Instant Telemetry Overlay // Jeffy Protocol
+          </div>
+        </div>
+        <div class="capsule-header-actions">
+          <span class="hotkey-indicator">ESC to close</span>
+          <button class="close-btn" onclick="toggleCapsuleVisibility()" title="Close overlay">✕</button>
+        </div>
+      </div>
+
+      <!-- SECTION 1: MASTER SLIDERS (Sound & Brightness) -->
+      <div class="sliders-grid">
+        
+        <!-- MASTER AUDIO SLIDER -->
+        <div class="slider-card" id="soundCard">
+          <div class="slider-head">
+            <div class="slider-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+              </svg>
+              <span>MASTER AUDIO</span>
+            </div>
+            <div class="slider-value-badge" id="volBadge">78%</div>
+          </div>
+
+          <div class="slider-sub-telemetry">
+            <span id="dbValue">-14.2 dB Output Level</span>
+            <span id="muteIndicator" style="cursor:pointer; color:var(--accent-red);" onclick="toggleMute()">MUTE [OFF]</span>
+          </div>
+
+          <div class="range-container">
+            <input type="range" id="volRange" min="0" max="100" value="78" oninput="updateVolume(this.value)">
+          </div>
+
+          <!-- Equalizer bar simulation -->
+          <div class="eq-canvas-container" id="eqContainer">
+            <!-- 24 dynamic EQ bars populated via JS -->
+          </div>
+
+          <div class="slider-chips">
+            <div class="chip-btn" onclick="setVolumePreset(25)">25%</div>
+            <div class="chip-btn" onclick="setVolumePreset(50)">50%</div>
+            <div class="chip-btn active" onclick="setVolumePreset(78)">78%</div>
+            <div class="chip-btn" onclick="setVolumePreset(100)">100%</div>
+          </div>
+
+          <div class="audio-sink-pill" onclick="cycleAudioSink()">
+            <span id="currentAudioSink">🎧 Sony WH-1000XM5 (LDAC 990k)</span>
+            <span style="color:var(--accent-cyan); font-size:10px;">CYCLE ▾</span>
+          </div>
+        </div>
+
+        <!-- DISPLAY BRIGHTNESS SLIDER -->
+        <div class="slider-card" id="brightnessCard">
+          <div class="slider-head">
+            <div class="slider-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="5"></circle>
+                <line x1="12" y1="1" x2="12" y2="3"></line>
+                <line x1="12" y1="21" x2="12" y2="23"></line>
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                <line x1="1" y1="12" x2="3" y2="12"></line>
+                <line x1="21" y1="12" x2="23" y2="12"></line>
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+              </svg>
+              <span>DISPLAY BRIGHTNESS</span>
+            </div>
+            <div class="slider-value-badge" id="brightBadge">85%</div>
+          </div>
+
+          <div class="slider-sub-telemetry">
+            <span id="nitsValue">425 cd/m² · QHD 240Hz</span>
+            <span id="autoLuxLabel" style="color:var(--accent-green);">AUTO-LUX: OFF</span>
+          </div>
+
+          <div class="range-container">
+            <input type="range" id="brightRange" min="10" max="100" value="85" oninput="updateBrightness(this.value)">
+          </div>
+
+          <div class="slider-chips" style="margin-top: 14px;">
+            <div class="chip-btn" onclick="setBrightnessPreset(20)">20% ECO</div>
+            <div class="chip-btn" onclick="setBrightnessPreset(50)">50% NORM</div>
+            <div class="chip-btn active" onclick="setBrightnessPreset(85)">85% TACT</div>
+            <div class="chip-btn" onclick="setBrightnessPreset(100)">MAX 100%</div>
+          </div>
+
+          <div class="audio-sink-pill" onclick="toggleAutoLux()">
+            <span>☀️ Auto-Lux Ambient Adaptation</span>
+            <span id="autoLuxStatus" style="color:var(--text-muted); font-size:10px;">DISABLED</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- SECTION 2: CONNECTIVITY (Wi-Fi & Bluetooth) -->
+      <div class="connectivity-grid">
+        
+        <!-- WI-FI MODULE -->
+        <div class="connect-card" id="wifiCard">
+          <div class="connect-head">
+            <div class="connect-info">
+              <div class="connect-icon active" id="wifiIcon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M5 12.55a11 11 0 0 1 14.08 0"></path>
+                  <path d="M1.42 9a16 16 0 0 1 21.16 0"></path>
+                  <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+                  <line x1="12" y1="20" x2="12.01" y2="20"></line>
+                </svg>
+              </div>
+              <div class="connect-texts">
+                <div class="connect-title" id="wifiSSID">JEFFY_5G (Active)</div>
+                <div class="connect-subtitle" id="wifiDetails">5.8 GHz · WPA3 · 866 Mbps</div>
+              </div>
+            </div>
+
+            <label class="switch cyan">
+              <input type="checkbox" id="wifiToggle" checked onchange="toggleWifi(this.checked)">
+              <span class="switch-slider"></span>
+            </label>
+          </div>
+
+          <div class="connect-drawer" id="wifiDrawer">
+            <div class="connect-drawer-row">
+              <span>SIGNAL STRENGTH</span>
+              <div class="signal-bars">
+                <div class="signal-bar on" style="height:4px;"></div>
+                <div class="signal-bar on" style="height:7px;"></div>
+                <div class="signal-bar on" style="height:10px;"></div>
+                <div class="signal-bar on" style="height:13px;"></div>
+              </div>
+            </div>
+            <div class="connect-drawer-row">
+              <span>LOCAL IP ADDRESS</span>
+              <b>192.168.1.108</b>
+            </div>
+            <div class="connect-drawer-row">
+              <span>GATEWAY / DNS</span>
+              <b>192.168.1.1 (Cloudflare)</b>
+            </div>
+            <button class="drawer-action-btn" onclick="openNetworkScanner()">SCAN NEARBY ACCESS POINTS ➔</button>
+          </div>
+        </div>
+
+        <!-- BLUETOOTH MODULE -->
+        <div class="connect-card" id="btCard">
+          <div class="connect-head">
+            <div class="connect-info">
+              <div class="connect-icon active" id="btIcon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="6.5 6.5 17.5 17.5 12 23 12 1 17.5 6.5 6.5 17.5"></polyline>
+                </svg>
+              </div>
+              <div class="connect-texts">
+                <div class="connect-title" id="btTitle">BLUETOOTH 5.3</div>
+                <div class="connect-subtitle" id="btSub">1 Connected · 2 Paired</div>
+              </div>
+            </div>
+
+            <label class="switch">
+              <input type="checkbox" id="btToggle" checked onchange="toggleBluetooth(this.checked)">
+              <span class="switch-slider"></span>
+            </label>
+          </div>
+
+          <div class="connect-drawer" id="btDrawer">
+            <div class="connect-drawer-row">
+              <span>ACTIVE AUDIO DEVICE</span>
+              <span class="battery-pill">85% 🔋</span>
+            </div>
+            <div class="connect-drawer-row">
+              <b style="color:#fff;">Sony WH-1000XM5</b>
+              <span style="color:var(--accent-green); font-size:10px;">CONNECTED</span>
+            </div>
+            <div class="connect-drawer-row">
+              <span>PAIRED HARDWARE</span>
+              <span>Keychron K2 Pro, DualSense</span>
+            </div>
+            <button class="drawer-action-btn" onclick="simulatePairNewDevice()">+ PAIR NEW HARDWARE ➔</button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- SECTION 3: TACTICAL MATRIX -->
+      <div class="matrix-title">
+        <span>✦ TACTICAL MODE MATRIX & QUICK TOGGLES</span>
+      </div>
+
+      <div class="matrix-grid">
+        
+        <!-- HYPRSUNSET NIGHT LIGHT -->
+        <div class="matrix-tile amber" id="tileNight" onclick="toggleNightLight()">
+          <div class="tile-top">
+            <span class="tile-icon">🌙</span>
+            <div class="tile-status" id="statusNight"></div>
+          </div>
+          <div class="tile-bottom">
+            <div class="tile-name">NIGHT LIGHT</div>
+            <div class="tile-desc" id="nightDesc">Hyprsunset 3400K Warmth</div>
+          </div>
+        </div>
+
+        <!-- MILO GAME MODE -->
+        <div class="matrix-tile" id="tileGame" onclick="toggleGameMode()">
+          <div class="tile-top">
+            <span class="tile-icon">⚡</span>
+            <div class="tile-status" id="statusGame"></div>
+          </div>
+          <div class="tile-bottom">
+            <div class="tile-name">GAME MODE</div>
+            <div class="tile-desc" id="gameDesc">VRAM Priority Lock</div>
+          </div>
+        </div>
+
+        <!-- VOICE CORTEX -->
+        <div class="matrix-tile green" id="tileVoice" onclick="toggleVoiceCortex()">
+          <div class="tile-top">
+            <span class="tile-icon">🎙</span>
+            <div class="tile-status" id="statusVoice"></div>
+          </div>
+          <div class="tile-bottom">
+            <div class="tile-name">VOICE SENTINEL</div>
+            <div class="tile-desc" id="voiceDesc">Milo Active Mic</div>
+          </div>
+        </div>
+
+        <!-- OMARCHY TOP BAR TOGGLE -->
+        <div class="matrix-tile" id="tileBar" onclick="toggleOmarchyTopBarSimulation()">
+          <div class="tile-top">
+            <span class="tile-icon">🖥</span>
+            <div class="tile-status" id="statusBar"></div>
+          </div>
+          <div class="tile-bottom">
+            <div class="tile-name">TOP BAR</div>
+            <div class="tile-desc" id="barDesc">bar-off Flag Active</div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- SECTION 4: CAPSULE FOOTER -->
+      <div class="capsule-footer">
+        <div class="footer-left">
+          <span>HOST: <b>ALIENWARE M16</b></span>
+          <span>KERNEL: <b>6.11-CACHYOS</b></span>
+          <span>COMPOSITOR: <b>HYPRLAND WLR</b></span>
+        </div>
+        <div class="footer-right">
+          <span>SHORTCUTS:</span>
+          <span class="key-badge">SUPER + S</span>
+          <span class="key-badge">ESC</span>
+          <span class="key-badge">M</span>
+          <span class="key-badge">W</span>
+          <span class="key-badge">B</span>
+        </div>
+      </div>
+
+      <!-- SCANNER MODAL OVERLAY -->
+      <div class="scanner-modal" id="scannerModal">
+        <div class="scanner-header">
+          <div class="scanner-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 12.55a11 11 0 0 1 14.08 0"></path>
+              <path d="M1.42 9a16 16 0 0 1 21.16 0"></path>
+              <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+              <line x1="12" y1="20" x2="12.01" y2="20"></line>
+            </svg>
+            <span>NEARBY WI-FI NETWORKS (NMCLI SCAN)</span>
+          </div>
+          <button class="close-btn" onclick="closeNetworkScanner()">✕</button>
+        </div>
+
+        <div class="network-list">
+          <div class="net-item" onclick="selectNetwork('JEFFY_5G', '5.8 GHz', '100%')">
+            <div>
+              <div class="net-name">JEFFY_5G (Connected)</div>
+              <div class="net-meta">WPA3-Personal · Channel 36 · -42 dBm</div>
+            </div>
+            <button class="net-connect-btn" style="background:var(--accent-green);">CURRENT</button>
+          </div>
+
+          <div class="net-item" onclick="selectNetwork('NEOM_FIBER_EXT', '5.0 GHz', '85%')">
+            <div>
+              <div class="net-name">NEOM_FIBER_EXT</div>
+              <div class="net-meta">WPA2/WPA3 · Channel 149 · -58 dBm</div>
+            </div>
+            <button class="net-connect-btn">CONNECT</button>
+          </div>
+
+          <div class="net-item" onclick="selectNetwork('STARLINK_ALPHA', '2.4/5 GHz', '72%')">
+            <div>
+              <div class="net-name">STARLINK_ALPHA</div>
+              <div class="net-meta">WPA2-Enterprise · Channel 44 · -67 dBm</div>
+            </div>
+            <button class="net-connect-btn">CONNECT</button>
+          </div>
+
+          <div class="net-item" onclick="selectNetwork('MILO_OFFLINE_LAB', '5.8 GHz', '95%')">
+            <div>
+              <div class="net-name">MILO_OFFLINE_LAB</div>
+              <div class="net-meta">Hidden SSID · Channel 100 · -48 dBm</div>
+            </div>
+            <button class="net-connect-btn">CONNECT</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- TACTICAL TOAST -->
+  <div id="tacticalToast">
+    <span class="toast-icon">⚡</span>
+    <span id="toastMsg">Tactical Quick Settings initialized</span>
+  </div>
+
+  <script>
+    /* =====================================================================
+       1. WEB AUDIO SYNTHESIS ENGINE (Tactical Sci-Fi Sound FX)
+       ===================================================================== */
+    let audioCtx = null;
+    let sfxEnabled = true;
+
+    function getAudioContext() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+      return audioCtx;
+    }
+
+    function playBeep(freq = 880, type = 'sine', duration = 0.08, gainVal = 0.08) {
+      if (!sfxEnabled) return;
+      try {
+        const ctx = getAudioContext();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, ctx.currentTime);
+        gain.gain.setValueAtTime(gainVal, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + duration);
+      } catch(e) {}
+    }
+
+    function playTacticalClick() {
+      playBeep(1200, 'triangle', 0.04, 0.05);
+    }
+
+    function playTacticalToggle(on = true) {
+      if (on) {
+        playBeep(600, 'sine', 0.06, 0.07);
+        setTimeout(() => playBeep(1200, 'sine', 0.08, 0.09), 50);
+      } else {
+        playBeep(900, 'sine', 0.06, 0.07);
+        setTimeout(() => playBeep(450, 'sine', 0.08, 0.09), 50);
+      }
+    }
+
+    function playBassDrop() {
+      if (!sfxEnabled) return;
+      try {
+        const ctx = getAudioContext();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(220, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(45, ctx.currentTime + 0.35);
+        gain.gain.setValueAtTime(0.12, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.4);
+      } catch(e) {}
+    }
+
+    function toggleSFX() {
+      sfxEnabled = !sfxEnabled;
+      const btn = document.getElementById('sfxToggleBtn');
+      btn.innerText = sfxEnabled ? '🔊 SFX: ON' : '🔇 SFX: OFF';
+      btn.style.color = sfxEnabled ? 'var(--accent-cyan)' : 'var(--text-muted)';
+      showToast(sfxEnabled ? 'Audio Feedback Enabled' : 'Audio Feedback Muted');
+    }
+
+    /* =====================================================================
+       2. EQUALIZER BARS GENERATION
+       ===================================================================== */
+    const eqContainer = document.getElementById('eqContainer');
+    const eqBars = [];
+    for (let i = 0; i < 28; i++) {
+      const bar = document.createElement('div');
+      bar.className = 'eq-bar';
+      eqContainer.appendChild(bar);
+      eqBars.push(bar);
+    }
+
+    let isAudioPlaying = true;
+    function animateEq() {
+      if (isAudioPlaying) {
+        const volPercent = parseInt(document.getElementById('volRange').value) / 100;
+        eqBars.forEach((b, idx) => {
+          const noise = Math.sin(Date.now() * 0.006 + idx * 0.4) * 0.5 + 0.5;
+          const height = Math.max(3, Math.floor(noise * 20 * volPercent));
+          b.style.height = height + 'px';
+        });
+      } else {
+        eqBars.forEach(b => b.style.height = '3px');
+      }
+      requestAnimationFrame(animateEq);
+    }
+    requestAnimationFrame(animateEq);
+
+    /* =====================================================================
+       3. CONTROLS LOGIC & STATE
+       ===================================================================== */
+    let isMuted = false;
+    let autoLux = false;
+    let isNightLightOn = false;
+    let isGameModeOn = false;
+    let isVoiceOn = true;
+    let isBarOff = true; // matches ~/.local/state/omarchy/toggles/bar-off
+
+    const audioSinks = [
+      '🎧 Sony WH-1000XM5 (LDAC 990k)',
+      '🔊 Alienware Quad Internal Speakers',
+      '🎙 Virtual Studio Loopback Sink'
+    ];
+    let audioSinkIndex = 0;
+
+    function updateVolume(val) {
+      document.getElementById('volBadge').innerText = val + '%';
+      const db = (val == 0) ? '-∞ dB' : (Math.round((val - 100) * 0.5 * 10) / 10) + ' dB Output Level';
+      document.getElementById('dbValue').innerText = db;
+      if (isMuted && val > 0) {
+        isMuted = false;
+        document.getElementById('muteIndicator').innerText = 'MUTE [OFF]';
+        document.getElementById('muteIndicator').style.color = 'var(--accent-red)';
+      }
+      playBeep(300 + val * 6, 'sine', 0.03, 0.02);
+    }
+
+    function toggleMute() {
+      isMuted = !isMuted;
+      const indicator = document.getElementById('muteIndicator');
+      const volRange = document.getElementById('volRange');
+      if (isMuted) {
+        indicator.innerText = 'MUTED [ON]';
+        indicator.style.color = 'var(--text-muted)';
+        document.getElementById('volBadge').innerText = '0%';
+        isAudioPlaying = false;
+        showToast('Master Audio: Muted');
+      } else {
+        indicator.innerText = 'MUTE [OFF]';
+        indicator.style.color = 'var(--accent-red)';
+        document.getElementById('volBadge').innerText = volRange.value + '%';
+        isAudioPlaying = true;
+        showToast('Master Audio: Unmuted (' + volRange.value + '%)');
+      }
+      playTacticalToggle(!isMuted);
+    }
+
+    function setVolumePreset(val) {
+      const volRange = document.getElementById('volRange');
+      volRange.value = val;
+      updateVolume(val);
+      playTacticalClick();
+      showToast('Volume set to ' + val + '%');
+    }
+
+    function cycleAudioSink() {
+      audioSinkIndex = (audioSinkIndex + 1) % audioSinks.length;
+      document.getElementById('currentAudioSink').innerText = audioSinks[audioSinkIndex];
+      playTacticalClick();
+      showToast('Audio Sink Switched: ' + audioSinks[audioSinkIndex]);
+    }
+
+    function updateBrightness(val) {
+      document.getElementById('brightBadge').innerText = val + '%';
+      const nits = Math.round(val * 5);
+      document.getElementById('nitsValue').innerText = nits + ' cd/m² · QHD 240Hz';
+
+      // Update screen brightness filter
+      const opacity = 0.85 - (val / 100) * 0.85;
+      document.getElementById('brightnessFilter').style.background = `rgba(0, 0, 0, ${opacity})`;
+      playBeep(400 + val * 4, 'triangle', 0.03, 0.02);
+    }
+
+    function setBrightnessPreset(val) {
+      const bRange = document.getElementById('brightRange');
+      bRange.value = val;
+      updateBrightness(val);
+      playTacticalClick();
+      showToast('Brightness calibrated to ' + val + '%');
+    }
+
+    function toggleAutoLux() {
+      autoLux = !autoLux;
+      const status = document.getElementById('autoLuxStatus');
+      const label = document.getElementById('autoLuxLabel');
+      if (autoLux) {
+        status.innerText = 'ACTIVE (440 lx)';
+        status.style.color = 'var(--accent-green)';
+        label.innerText = 'AUTO-LUX: SENSING';
+        label.style.color = 'var(--accent-green)';
+        showToast('Auto-Lux Light Sensor Engaged');
+      } else {
+        status.innerText = 'DISABLED';
+        status.style.color = 'var(--text-muted)';
+        label.innerText = 'AUTO-LUX: OFF';
+        label.style.color = 'var(--text-muted)';
+        showToast('Auto-Lux Light Sensor Disabled');
+      }
+      playTacticalToggle(autoLux);
+    }
+
+    function toggleWifi(checked) {
+      const icon = document.getElementById('wifiIcon');
+      const title = document.getElementById('wifiSSID');
+      const drawer = document.getElementById('wifiDrawer');
+      if (checked) {
+        icon.classList.add('active');
+        title.innerText = 'JEFFY_5G (Active)';
+        drawer.style.opacity = '1';
+        drawer.style.pointerEvents = 'all';
+        showToast('Wi-Fi Connected: JEFFY_5G (5.8 GHz)');
+      } else {
+        icon.classList.remove('active');
+        title.innerText = 'Wi-Fi Interface Down';
+        drawer.style.opacity = '0.35';
+        drawer.style.pointerEvents = 'none';
+        showToast('Wi-Fi Radio Powered Off');
+      }
+      playTacticalToggle(checked);
+    }
+
+    function toggleBluetooth(checked) {
+      const icon = document.getElementById('btIcon');
+      const title = document.getElementById('btTitle');
+      const drawer = document.getElementById('btDrawer');
+      if (checked) {
+        icon.classList.add('active');
+        title.innerText = 'BLUETOOTH 5.3';
+        drawer.style.opacity = '1';
+        drawer.style.pointerEvents = 'all';
+        showToast('Bluetooth Radio Active');
+      } else {
+        icon.classList.remove('active');
+        title.innerText = 'Bluetooth Disabled';
+        drawer.style.opacity = '0.35';
+        drawer.style.pointerEvents = 'none';
+        showToast('Bluetooth Powered Off');
+      }
+      playTacticalToggle(checked);
+    }
+
+    function openNetworkScanner() {
+      document.getElementById('scannerModal').classList.add('open');
+      playTacticalClick();
+    }
+
+    function closeNetworkScanner() {
+      document.getElementById('scannerModal').classList.remove('open');
+      playTacticalClick();
+    }
+
+    function selectNetwork(name, band, strength) {
+      document.getElementById('wifiSSID').innerText = name + ' (Connected)';
+      document.getElementById('wifiDetails').innerText = band + ' · Handshake Confirmed';
+      closeNetworkScanner();
+      showToast('Switched network to ' + name);
+      playTacticalToggle(true);
+    }
+
+    function simulatePairNewDevice() {
+      showToast('Scanning for Bluetooth devices... (LE Radar Active)');
+      playTacticalClick();
+    }
+
+    function toggleNightLight() {
+      isNightLightOn = !isNightLightOn;
+      const tile = document.getElementById('tileNight');
+      const desc = document.getElementById('nightDesc');
+      const filter = document.getElementById('nightLightFilter');
+      if (isNightLightOn) {
+        tile.classList.add('active');
+        desc.innerText = '3400K Warmth Active';
+        filter.style.background = 'rgba(255, 120, 20, 0.18)';
+        showToast('Hyprsunset Night Light Enabled (3400K)');
+      } else {
+        tile.classList.remove('active');
+        desc.innerText = 'Hyprsunset 3400K Warmth';
+        filter.style.background = 'rgba(255, 120, 20, 0)';
+        showToast('Night Light Disabled (6500K Native)');
+      }
+      playTacticalToggle(isNightLightOn);
+    }
+
+    function toggleGameMode() {
+      isGameModeOn = !isGameModeOn;
+      const tile = document.getElementById('tileGame');
+      const desc = document.getElementById('gameDesc');
+      const pulse = document.getElementById('gameModePulse');
+      if (isGameModeOn) {
+        tile.classList.add('active');
+        desc.innerText = '240Hz Locked · Max VRAM';
+        pulse.style.opacity = '0.85';
+        playBassDrop();
+        showToast('⚡ MILO GAME MODE ENGAGED: 100% GPU PRIORITY');
+      } else {
+        tile.classList.remove('active');
+        desc.innerText = 'VRAM Priority Lock';
+        pulse.style.opacity = '0';
+        playTacticalToggle(false);
+        showToast('Game Mode Disengaged: Balanced Profile');
+      }
+    }
+
+    function toggleVoiceCortex() {
+      isVoiceOn = !isVoiceOn;
+      const tile = document.getElementById('tileVoice');
+      const desc = document.getElementById('voiceDesc');
+      if (isVoiceOn) {
+        tile.classList.add('active');
+        desc.innerText = 'Milo Active Mic';
+        showToast('Voice Sentinel: Listening on Super+V');
+      } else {
+        tile.classList.remove('active');
+        desc.innerText = 'Microphone Muted';
+        showToast('Voice Sentinel: Suspended');
+      }
+      playTacticalToggle(isVoiceOn);
+    }
+
+    // Toggle simulated Omarchy top bar and update badge
+    function toggleOmarchyTopBarSimulation() {
+      isBarOff = !isBarOff;
+      const barDot = document.getElementById('barDot');
+      const barText = document.getElementById('barText');
+      const tile = document.getElementById('tileBar');
+      const barDesc = document.getElementById('barDesc');
+
+      if (isBarOff) {
+        barDot.className = 'status-dot red';
+        barText.innerText = 'OMARCHY TOP BAR: DISABLED';
+        tile.classList.remove('active');
+        barDesc.innerText = 'bar-off Flag Active';
+        showToast('Omarchy Bar: Disabled (~/.local/state/omarchy/toggles/bar-off exists)');
+      } else {
+        barDot.className = 'status-dot';
+        barText.innerText = 'OMARCHY TOP BAR: ENABLED';
+        tile.classList.add('active');
+        barDesc.innerText = 'Top Bar Visible';
+        showToast('Omarchy Bar: Restored (bar-off flag removed)');
+      }
+      playTacticalToggle(!isBarOff);
+    }
+
+    /* =====================================================================
+       4. CAPSULE VISIBILITY & 3D SPATIAL TILT (Antigravity Design)
+       ===================================================================== */
+    let isCapsuleVisible = true;
+    const capsuleWrapper = document.getElementById('capsuleWrapper');
+    const tacticalCapsule = document.getElementById('tacticalCapsule');
+
+    function toggleCapsuleVisibility() {
+      isCapsuleVisible = !isCapsuleVisible;
+      if (isCapsuleVisible) {
+        capsuleWrapper.style.transform = 'translateY(0) scale(1)';
+        capsuleWrapper.style.opacity = '1';
+        capsuleWrapper.style.pointerEvents = 'all';
+        playTacticalToggle(true);
+        showToast('Option B Control Overlay Summoned');
+      } else {
+        capsuleWrapper.style.transform = 'translateY(40px) scale(0.96)';
+        capsuleWrapper.style.opacity = '0';
+        capsuleWrapper.style.pointerEvents = 'none';
+        playTacticalToggle(false);
+        showToast('Option B Overlay Hidden');
+      }
+    }
+
+    // Interactive 3D Parallax on Mouse Move
+    document.addEventListener('mousemove', (e) => {
+      if (!isCapsuleVisible) return;
+      const cx = window.innerWidth / 2;
+      const cy = window.innerHeight / 2;
+      const dx = (e.clientX - cx) / cx;
+      const dy = (e.clientY - cy) / cy;
+
+      const tiltX = -dy * 3.5;
+      const tiltY = dx * 3.5;
+      tacticalCapsule.style.transform = `rotateX(${tiltX}deg) rotateY(${tiltY}deg)`;
+    });
+
+    // Reset tilt when mouse leaves
+    document.addEventListener('mouseleave', () => {
+      tacticalCapsule.style.transform = `rotateX(0deg) rotateY(0deg)`;
+    });
+
+    /* =====================================================================
+       5. KEYBOARD LISTENERS & LIVE TELEMETRY
+       ===================================================================== */
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if (document.getElementById('scannerModal').classList.contains('open')) {
+          closeNetworkScanner();
+        } else if (isCapsuleVisible) {
+          toggleCapsuleVisibility();
+        }
+      } else if (e.key === 's' || e.key === 'S') {
+        if (!e.ctrlKey && !e.altKey && !e.metaKey) {
+          toggleCapsuleVisibility();
+        }
+      } else if (e.key === 'm' || e.key === 'M') {
+        toggleGameMode();
+      } else if (e.key === 'w' || e.key === 'W') {
+        const t = document.getElementById('wifiToggle');
+        t.checked = !t.checked;
+        toggleWifi(t.checked);
+      } else if (e.key === 'b' || e.key === 'B') {
+        const t = document.getElementById('btToggle');
+        t.checked = !t.checked;
+        toggleBluetooth(t.checked);
+      } else if (e.key === 'n' || e.key === 'N') {
+        toggleNightLight();
+      }
+    });
+
+    // Clock and dynamic telemetry update
+    setInterval(() => {
+      const now = new Date();
+      document.getElementById('topClock').innerText = now.toTimeString().split(' ')[0];
+      
+      // fluctuate cpu slightly
+      const cpu = Math.floor(16 + Math.sin(Date.now() * 0.001) * 7);
+      document.getElementById('topCpu').innerText = cpu + '%';
+    }, 1000);
+
+    // Toast helper
+    let toastTimeout;
+    function showToast(msg) {
+      const toast = document.getElementById('tacticalToast');
+      document.getElementById('toastMsg').innerText = msg;
+      toast.classList.add('show');
+      clearTimeout(toastTimeout);
+      toastTimeout = setTimeout(() => {
+        toast.classList.remove('show');
+      }, 3000);
+    }
+
+    // Initialize initial values
+    updateBrightness(85);
+    updateVolume(78);
+    // Initialize Voice Cortex as active by default
+    document.getElementById('tileVoice').classList.add('active');
+  </script>
+</body>
+</html>
