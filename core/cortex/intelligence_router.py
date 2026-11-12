@@ -783,6 +783,52 @@ def handle_camera_intent(prompt: str) -> Optional[Tuple[str, str]]:
     return None
 
 
+def handle_mail_intent(prompt: str) -> Optional[Tuple[str, str]]:
+    """Intercept natural language email queries & actions to query Milo Gmail."""
+    if prompt.startswith("You are Milo") or "system:" in prompt.lower() or len(prompt.split()) > 35:
+        return None
+
+    p = prompt.strip().lower()
+    milo_mail_bin = Path.home() / ".local" / "bin" / "milo-mail"
+    if not milo_mail_bin.exists():
+        return None
+
+    # 1. Unread Mail Summary / Briefing
+    if re.search(r'\b(?:summarize|brief\s+me\s+on|give\s+me\s+a\s+summary\s+of)\s+(?:my\s+)?(?:unread\s+)?(?:emails?|mail|inbox)\b', p) or \
+       re.search(r'\b(?:email|mail)\s+(?:summary|briefing)\b', p):
+        try:
+            res = subprocess.run([str(milo_mail_bin), "summarize"], capture_output=True, text=True, timeout=18)
+            if res.stdout.strip():
+                return res.stdout.strip(), "Milo Mail Copilot"
+        except Exception:
+            pass
+
+    # 2. Check Mail / Any New Emails / Status
+    if re.search(r'\b(?:check\s+(?:my\s+)?(?:email|mail|inbox)|any\s+(?:new\s+)?(?:emails?|mail)|what(?:\'?s|\s+is)\s+in\s+my\s+(?:inbox|mail|email)|do\s+i\s+have\s+(?:any\s+)?(?:new\s+)?(?:emails?|mail))\b', p) or \
+       p in ["check mail", "check email", "emails", "unread mail", "unread emails", "inbox"]:
+        try:
+            res = subprocess.run([str(milo_mail_bin), "list"], capture_output=True, text=True, timeout=12)
+            if res.stdout.strip():
+                clean_out = re.sub(r'\x1b\[[0-9;]*m', '', res.stdout.strip())
+                return clean_out, "Milo Mail Copilot"
+        except Exception:
+            pass
+
+    # 3. Read specific email: "read email #X" or "read email X"
+    read_match = re.search(r'\bread\s+(?:email|mail)\s+#?([0-9]+)\b', p)
+    if read_match:
+        mid = read_match.group(1)
+        try:
+            res = subprocess.run([str(milo_mail_bin), "read", mid], capture_output=True, text=True, timeout=10)
+            if res.stdout.strip():
+                clean_out = re.sub(r'\x1b\[[0-9;]*m', '', res.stdout.strip())
+                return clean_out, "Milo Mail Copilot"
+        except Exception:
+            pass
+
+    return None
+
+
 def execute_hybrid_query(prompt: str) -> Tuple[str, str]:
     """
     Execute query using current intelligence mode and automatic failover.
@@ -802,6 +848,11 @@ def execute_hybrid_query(prompt: str) -> Tuple[str, str]:
     music_res = handle_music_intent(prompt)
     if music_res:
         return music_res
+
+    # 0.3 Check mail-specific intent
+    mail_res = handle_mail_intent(prompt)
+    if mail_res:
+        return mail_res
 
     # 1. Check optical vision intent
     cam_res = handle_camera_intent(prompt)

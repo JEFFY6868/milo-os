@@ -1,0 +1,579 @@
+#!/usr/bin/env python3
+"""
+Milo Sovereign Gmail & Email Engine
+Part of MiloOS. Built for Arch Linux, Hyprland & Tactical Trinity HUD.
+Local IMAP/SMTP engine with zero cloud telemetry, AI inbox summaries & HUD caching.
+"""
+
+import os
+import sys
+import re
+import json
+import time
+import socket
+import argparse
+import subprocess
+import email
+import email.header
+import email.utils
+import imaplib
+import smtplib
+from datetime import datetime, timezone
+from pathlib import Path
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+# Base Paths
+DATA_DIR = Path.home() / ".local" / "share" / "milo" / "mail"
+INBOX_CACHE = DATA_DIR / "inbox.json"
+TRIGGER_PATH = Path("/tmp/milo-mail-trigger")
+SCRATCHPAD_TRIGGER = Path("/tmp/milo-scratchpad-trigger")
+
+CONFIG_MAIL_ENV = Path.home() / ".config" / "milo" / "mail.env"
+CONFIG_KEYS_ENV = Path.home() / ".config" / "milo" / "keys.env"
+
+# ANSI Cyberpunk Tactical Theme
+CYAN = "\033[1;36m"
+CRIMSON = "\033[1;31m"
+GREEN = "\033[1;32m"
+YELLOW = "\033[1;33m"
+PURPLE = "\033[1;35m"
+DIM = "\033[2m"
+BOLD = "\033[1m"
+RESET = "\033[0m"
+
+IMAP_SERVER = "imap.gmail.com"
+IMAP_PORT = 993
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 465
+
+def get_credentials():
+    """Retrieve Gmail address and App Password from env, mail.env, or keys.env."""
+    user = os.environ.get("GMAIL_USER") or os.environ.get("GMAIL_ADDRESS")
+    password = os.environ.get("GMAIL_APP_PASSWORD") or os.environ.get("GMAIL_PASSWORD")
+
+    # 1. Check ~/.config/milo/mail.env
+    if CONFIG_MAIL_ENV.exists():
+        try:
+            with open(CONFIG_MAIL_ENV, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        k = k.strip()
+                        v = v.strip().strip('"\'')
+                        if k in ("GMAIL_USER", "GMAIL_ADDRESS") and not user:
+                            user = v
+                        elif k in ("GMAIL_APP_PASSWORD", "GMAIL_PASSWORD") and not password:
+                            password = v
+        except Exception:
+            pass
+
+    # 2. Check ~/.config/milo/keys.env
+    if CONFIG_KEYS_ENV.exists() and (not user or not password):
+        try:
+            with open(CONFIG_KEYS_ENV, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        k = k.strip()
+                        v = v.strip().strip('"\'')
+                        if k in ("GMAIL_USER", "GMAIL_ADDRESS") and not user:
+                            user = v
+                        elif k in ("GMAIL_APP_PASSWORD", "GMAIL_PASSWORD") and not password:
+                            password = v
+        except Exception:
+            pass
+
+    if password:
+        # Strip internal spaces from Google App Password (e.g. "abcd efgh ijkl mnop" -> "abcdefghijklmnop")
+        password = password.replace(" ", "")
+
+    return user, password
+
+def decode_mime_words(raw_header):
+    """Safely decode encoded RFC 2047 MIME header strings (e.g. UTF-8 / Base64)."""
+    if not raw_header:
+        return ""
+    try:
+        decoded_fragments = email.header.decode_header(raw_header)
+        text_parts = []
+        for fragment, encoding in decoded_fragments:
+            if isinstance(fragment, bytes):
+                enc = encoding or "utf-8"
+                try:
+                    text_parts.append(fragment.decode(enc, errors="replace"))
+                except Exception:
+                    text_parts.append(fragment.decode("utf-8", errors="replace"))
+            else:
+                text_parts.append(str(fragment))
+        return "".join(text_parts).strip()
+    except Exception:
+        return str(raw_header).strip()
+
+def clean_body_text(msg):
+    """Extract and sanitize plain text from an email.Message object."""
+    plain_text = ""
+    html_text = ""
+
+    if msg.is_multipart():
+        for part in msg.walk():
+            ctype = part.get_content_type()
+            cdisp = str(part.get("Content-Disposition", ""))
+            if "attachment" in cdisp:
+                continue
+            try:
+                payload = part.get_payload(decode=True)
+                if not payload:
+                    continue
+                charset = part.get_content_charset() or "utf-8"
+                content = payload.decode(charset, errors="replace")
+                if ctype == "text/plain" and not plain_text:
+                    plain_text = content
+                elif ctype == "text/html" and not html_text:
+                    html_text = content
+            except Exception:
+                continue
+    else:
+        try:
+            payload = msg.get_payload(decode=True)
+            if payload:
+                charset = msg.get_content_charset() or "utf-8"
+                content = payload.decode(charset, errors="replace")
+                if msg.get_content_type() == "text/html":
+                    html_text = content
+                else:
+                    plain_text = content
+        except Exception:
+            pass
+
+    final_text = plain_text if plain_text else html_text
+    if final_text:
+        # Strip HTML tags
+        final_text = re.sub(r'<style[^>]*>.*?</style>', '', final_text, flags=re.DOTALL)
+        final_text = re.sub(r'<script[^>]*>.*?</script>', '', final_text, flags=re.DOTALL)
+        final_text = re.sub(r'<[^>]+>', ' ', final_text)
+        # Collapse whitespaces
+        final_text = re.sub(r'\s+', ' ', final_text).strip()
+    return final_text or "(No message body content)"
+
+def format_relative_time(dt_str):
+    """Convert an email Date header into a clean relative string e.g. '12m ago', '2h ago', or 'Nov 12'."""
+    try:
+        dt = email.utils.parsedate_to_datetime(dt_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        delta = now - dt
+        secs = int(delta.total_seconds())
+        if secs < 60:
+            return "just now"
+        if secs < 3600:
+            return f"{secs // 60}m ago"
+        if secs < 86400:
+            return f"{secs // 3600}h ago"
+        if secs < 172800:
+            return "yesterday"
+        return dt.strftime("%b %d")
+    except Exception:
+        return dt_str[:16] if dt_str else "recently"
+
+def connect_imap(user, password, timeout=12):
+    """Establish authenticated IMAP connection with timeout."""
+    try:
+        client = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT, timeout=timeout)
+        client.login(user, password)
+        return client
+    except imaplib.IMAP4.error as e:
+        raise PermissionError(f"Authentication failed for {user}: {e}")
+    except socket.timeout:
+        raise TimeoutError("IMAP connection timed out connecting to imap.gmail.com")
+    except Exception as e:
+        raise ConnectionError(f"Failed to connect to IMAP server: {e}")
+
+def fetch_unread_messages(client, limit=10):
+    """Retrieve list of unread message metadata & snippets from INBOX."""
+    client.select("INBOX", readonly=True)
+    status, response = client.search(None, "UNSEEN")
+    if status != "OK" or not response or not response[0]:
+        return []
+
+    msg_ids = response[0].split()
+    # Take the latest ones first
+    latest_ids = msg_ids[-limit:][::-1]
+
+    items = []
+    for mid in latest_ids:
+        mid_str = mid.decode()
+        try:
+            res, data = client.fetch(mid, "(RFC822.HEADER BODY.PEEK[])")
+            if res != "OK":
+                continue
+            raw_email = None
+            for part in data:
+                if isinstance(part, tuple) and len(part) >= 2:
+                    raw_email = part[1]
+                    break
+            if not raw_email:
+                continue
+
+            msg = email.message_from_bytes(raw_email)
+            subject = decode_mime_words(msg.get("Subject", "(No Subject)"))
+            sender = decode_mime_words(msg.get("From", "Unknown Sender"))
+            date_raw = msg.get("Date", "")
+            time_rel = format_relative_time(date_raw)
+            body = clean_body_text(msg)
+            snippet = (body[:220] + "...") if len(body) > 220 else body
+
+            # Parse sender name and email
+            sender_name, sender_email = email.utils.parseaddr(sender)
+            display_sender = sender_name if sender_name else (sender_email or sender)
+
+            items.append({
+                "id": mid_str,
+                "from": display_sender,
+                "email": sender_email,
+                "subject": subject,
+                "date": date_raw,
+                "time_rel": time_rel,
+                "snippet": snippet,
+                "body": body
+            })
+        except Exception:
+            continue
+
+    return items
+
+def cmd_status(args):
+    """Check Gmail connectivity and display unread stats."""
+    user, password = get_credentials()
+    if not user or not password:
+        if args.json:
+            print(json.dumps({"configured": False, "unread_count": 0, "error": "Credentials missing"}))
+        else:
+            print(f"{CRIMSON}✖ Milo Gmail: NOT CONFIGURED{RESET}")
+            print(f"{DIM}Add your Gmail credentials to {CONFIG_MAIL_ENV} or {CONFIG_KEYS_ENV}:{RESET}")
+            print(f"  GMAIL_USER=\"youremail@gmail.com\"")
+            print(f"  GMAIL_APP_PASSWORD=\"xxxx xxxx xxxx xxxx\"\n")
+            print(f"Run {CYAN}milo-mail config{RESET} for setup instructions.")
+        return 1
+
+    try:
+        client = connect_imap(user, password)
+        client.select("INBOX", readonly=True)
+        status, response = client.search(None, "UNSEEN")
+        unread_count = 0
+        if status == "OK" and response and response[0]:
+            unread_count = len(response[0].split())
+        client.logout()
+
+        if args.json:
+            print(json.dumps({"configured": True, "user": user, "unread_count": unread_count}))
+        else:
+            status_color = CRIMSON if unread_count > 0 else GREEN
+            pill = f"{status_color}✉ {unread_count} UNREAD{RESET}" if unread_count > 0 else f"{GREEN}✉ INBOX ZERO{RESET}"
+            print(f"{CYAN}● MILO GMAIL TELEMETRY{RESET} · {user}")
+            print(f"  Status: {pill} in INBOX (imap.gmail.com:993)")
+        return 0
+    except Exception as e:
+        if args.json:
+            print(json.dumps({"configured": True, "unread_count": 0, "error": str(e)}))
+        else:
+            print(f"{CRIMSON}✖ Milo Gmail Error:{RESET} {e}")
+        return 1
+
+def cmd_sync(args):
+    """Sync unread emails from Gmail into local cache for HUD and Cortex."""
+    user, password = get_credentials()
+    if not user or not password:
+        print(f"{CRIMSON}✖ Credentials not configured.{RESET} Run {CYAN}milo-mail config{RESET}.")
+        return 1
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        client = connect_imap(user, password)
+        items = fetch_unread_messages(client, limit=15)
+        client.logout()
+
+        payload = {
+            "updated_at": datetime.now().isoformat(),
+            "user": user,
+            "unread_count": len(items),
+            "emails": items
+        }
+
+        with open(INBOX_CACHE, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+
+        # Signal HUD or scratchpad reload
+        try:
+            TRIGGER_PATH.touch()
+            SCRATCHPAD_TRIGGER.touch()
+        except Exception:
+            pass
+
+        if not args.quiet:
+            print(f"{GREEN}✔ Synced {len(items)} unread emails to {INBOX_CACHE}{RESET}")
+        return 0
+    except Exception as e:
+        print(f"{CRIMSON}✖ Sync failed:{RESET} {e}")
+        return 1
+
+def cmd_list(args):
+    """Display tactical list of unread or recent emails."""
+    user, password = get_credentials()
+    if not user or not password:
+        print(f"{CRIMSON}✖ Credentials not configured.{RESET} Run {CYAN}milo-mail config{RESET}.")
+        return 1
+
+    try:
+        client = connect_imap(user, password)
+        items = fetch_unread_messages(client, limit=args.limit)
+        client.logout()
+
+        if not items:
+            print(f"{GREEN}✔ INBOX ZERO{RESET} · No unread emails in Gmail ({user})")
+            return 0
+
+        print(f"\n{CYAN}{BOLD}✉ MILO GMAIL INBOX{RESET} · {YELLOW}{len(items)} UNREAD{RESET} ({user})")
+        print(f"{DIM}{'─' * 70}{RESET}")
+        for idx, item in enumerate(items, 1):
+            sender = item['from'][:20].ljust(20)
+            subj = item['subject'][:40].ljust(40)
+            time_str = item['time_rel'].rjust(9)
+            print(f" {CRIMSON}#{item['id']}{RESET}  {BOLD}{sender}{RESET}  {subj}  {CYAN}{time_str}{RESET}")
+            if args.verbose:
+                print(f"      {DIM}{item['snippet'][:90]}...{RESET}")
+        print(f"{DIM}{'─' * 70}{RESET}")
+        print(f"Use {CYAN}milo-mail read <id>{RESET} to view full body, or {CYAN}milo-mail summarize{RESET} for AI digest.\n")
+        return 0
+    except Exception as e:
+        print(f"{CRIMSON}✖ Failed to fetch messages:{RESET} {e}")
+        return 1
+
+def cmd_read(args):
+    """Read a specific email by ID."""
+    user, password = get_credentials()
+    if not user or not password:
+        print(f"{CRIMSON}✖ Credentials not configured.{RESET}")
+        return 1
+
+    try:
+        client = connect_imap(user, password)
+        client.select("INBOX", readonly=True)
+        res, data = client.fetch(str(args.id).encode(), "(RFC822)")
+        client.logout()
+
+        if res != "OK" or not data:
+            print(f"{CRIMSON}✖ Email #{args.id} not found.{RESET}")
+            return 1
+
+        raw_email = None
+        for part in data:
+            if isinstance(part, tuple) and len(part) >= 2:
+                raw_email = part[1]
+                break
+
+        if not raw_email:
+            print(f"{CRIMSON}✖ Unable to parse email #{args.id}.{RESET}")
+            return 1
+
+        msg = email.message_from_bytes(raw_email)
+        subject = decode_mime_words(msg.get("Subject", "(No Subject)"))
+        sender = decode_mime_words(msg.get("From", "Unknown"))
+        to_addr = decode_mime_words(msg.get("To", user))
+        date_raw = msg.get("Date", "")
+        body = clean_body_text(msg)
+
+        print(f"\n{CYAN}{BOLD}✉ EMAIL #{args.id}{RESET}")
+        print(f"{DIM}{'─' * 60}{RESET}")
+        print(f"{BOLD}From:{RESET}    {sender}")
+        print(f"{BOLD}To:{RESET}      {to_addr}")
+        print(f"{BOLD}Date:{RESET}    {date_raw}")
+        print(f"{BOLD}Subject:{RESET} {YELLOW}{subject}{RESET}")
+        print(f"{DIM}{'─' * 60}{RESET}\n")
+        print(body)
+        print(f"\n{DIM}{'─' * 60}{RESET}\n")
+        return 0
+    except Exception as e:
+        print(f"{CRIMSON}✖ Failed to read email:{RESET} {e}")
+        return 1
+
+def cmd_summarize(args):
+    """Generate an AI executive summary of recent unread emails using Milo Cortex."""
+    user, password = get_credentials()
+    if not user or not password:
+        print(f"Milo Gmail is not configured yet. Add your credentials in ~/.config/milo/mail.env")
+        return 1
+
+    # First fetch latest unread emails
+    try:
+        client = connect_imap(user, password)
+        items = fetch_unread_messages(client, limit=args.limit)
+        client.logout()
+    except Exception as e:
+        print(f"Could not connect to Gmail: {e}")
+        return 1
+
+    if not items:
+        msg = f"✔ INBOX ZERO: You have no unread emails right now in your Gmail ({user})."
+        print(msg)
+        return 0
+
+    # Format email summaries for LLM prompt
+    mail_corpus = []
+    for idx, item in enumerate(items, 1):
+        mail_corpus.append(f"[{idx}] From: {item['from']} <{item['email']}>\n    Subject: {item['subject']}\n    Date: {item['time_rel']}\n    Snippet: {item['snippet']}")
+
+    corpus_text = "\n\n".join(mail_corpus)
+
+    prompt = (
+        "You are Milo, Jeffy's elite tactical personal AI assistant on Arch Linux.\n"
+        f"Here are {len(items)} recent unread emails from Jeffy's Gmail inbox:\n\n"
+        f"{corpus_text}\n\n"
+        "Provide a crisp, high-signal, executive bullet-point briefing (max 3-5 bullets) of what matters. "
+        "Highlight urgent tasks, invoices, security alerts, or important messages. Filter out marketing fluff."
+    )
+
+    # Invoke Milo Cortex / milo-ask
+    milo_ask_bin = Path.home() / ".local" / "bin" / "milo-ask"
+    if milo_ask_bin.exists():
+        try:
+            res = subprocess.run([str(milo_ask_bin), prompt], capture_output=True, text=True, timeout=15)
+            if res.returncode == 0 and res.stdout.strip():
+                print(res.stdout.strip())
+                return 0
+        except Exception:
+            pass
+
+    # Heuristic fallback if LLM is unreachable
+    print(f"\n{CYAN}{BOLD}✉ MILO INBOX BRIEFING{RESET} ({len(items)} unread)")
+    print(f"{DIM}{'─' * 55}{RESET}")
+    for item in items:
+        print(f"• {BOLD}{item['from']}{RESET}: {item['subject']} {DIM}({item['time_rel']}){RESET}")
+    print(f"{DIM}{'─' * 55}{RESET}\n")
+    return 0
+
+def cmd_send(args):
+    """Send an email via Gmail SMTP SSL."""
+    user, password = get_credentials()
+    if not user or not password:
+        print(f"{CRIMSON}✖ Credentials not configured.{RESET}")
+        return 1
+
+    if not args.to or not args.subject or not args.body:
+        print(f"{CRIMSON}✖ Error:{RESET} --to, --subject, and --body are required.")
+        return 1
+
+    msg = MIMEMultipart()
+    msg["From"] = user
+    msg["To"] = args.to
+    msg["Subject"] = args.subject
+    msg.attach(MIMEText(args.body, "plain", "utf-8"))
+
+    try:
+        server = smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, timeout=12)
+        server.login(user, password)
+        server.send_message(msg)
+        server.quit()
+        print(f"{GREEN}✔ Email dispatched successfully to {args.to}{RESET}")
+        return 0
+    except Exception as e:
+        print(f"{CRIMSON}✖ Failed to send email:{RESET} {e}")
+        return 1
+
+def cmd_config(args):
+    """Display Gmail App Password configuration instructions."""
+    user, password = get_credentials()
+    configured = bool(user and password)
+
+    print(f"\n{CYAN}{BOLD}✉ MILO GMAIL CONFIGURATION GUIDE (Option A){RESET}")
+    print(f"{DIM}{'─' * 65}{RESET}")
+    if configured:
+        masked_pw = ("*" * 12) + password[-4:] if len(password) >= 4 else "****"
+        print(f"{GREEN}✔ Status: CONFIG CONFIGURED{RESET}")
+        print(f"  Account:  {BOLD}{user}{RESET}")
+        print(f"  Password: {DIM}{masked_pw}{RESET}")
+        print(f"  File:     {CONFIG_MAIL_ENV}")
+    else:
+        print(f"{YELLOW}⚠ Status: NOT CONFIGURED YET{RESET}")
+
+    print(f"\n{BOLD}Step-by-step setup in 60 seconds:{RESET}")
+    print(f"  1. Go to your Google Account security settings:")
+    print(f"     {CYAN}https://myaccount.google.com/apppasswords{RESET}")
+    print(f"  2. If prompted, confirm 2-Step Verification is ON.")
+    print(f"  3. Create a new App Password with App name: {BOLD}Milo{RESET}")
+    print(f"  4. Google will generate a 16-character code (e.g. {DIM}abcd efgh ijkl mnop{RESET}).")
+    print(f"  5. Add your details to {CYAN}~/.config/milo/mail.env{RESET}:\n")
+    print(f"     GMAIL_USER=\"youremail@gmail.com\"")
+    print(f"     GMAIL_APP_PASSWORD=\"abcdefghijklmnop\"\n")
+    print(f"  6. Run {CYAN}milo-mail status{RESET} to test the connection.\n")
+    print(f"{DIM}{'─' * 65}{RESET}\n")
+    return 0
+
+def main():
+    parser = argparse.ArgumentParser(description="Milo Sovereign Gmail & Email Engine")
+    subparsers = parser.add_subparsers(dest="command")
+
+    # status
+    p_status = subparsers.add_parser("status", help="Check inbox status & unread count")
+    p_status.add_argument("--json", action="store_true", help="Output in JSON format")
+
+    # sync
+    p_sync = subparsers.add_parser("sync", help="Sync latest unread emails to local cache")
+    p_sync.add_argument("--quiet", "-q", action="store_true", help="Quiet mode")
+
+    # list
+    p_list = subparsers.add_parser("list", help="List unread emails")
+    p_list.add_argument("--limit", "-n", type=int, default=10, help="Number of emails to list")
+    p_list.add_argument("--verbose", "-v", action="store_true", help="Show snippet previews")
+
+    # read
+    p_read = subparsers.add_parser("read", help="Read an email by ID")
+    p_read.add_argument("id", help="Message ID to read")
+
+    # summarize
+    p_sum = subparsers.add_parser("summarize", help="Generate AI briefing of unread emails")
+    p_sum.add_argument("--limit", "-n", type=int, default=8, help="Number of emails to summarize")
+
+    # send
+    p_send = subparsers.add_parser("send", help="Send an email via SMTP")
+    p_send.add_argument("--to", required=True, help="Recipient email address")
+    p_send.add_argument("--subject", required=True, help="Email subject")
+    p_send.add_argument("--body", required=True, help="Email plain-text body")
+
+    # config
+    subparsers.add_parser("config", help="Show configuration status and instructions")
+
+    args = parser.parse_args()
+
+    if not args.command:
+        # Default behavior: if configured, list unread emails; else show config guide
+        user, pw = get_credentials()
+        if user and pw:
+            args.limit = 8
+            args.verbose = False
+            return cmd_list(args)
+        else:
+            return cmd_config(args)
+
+    cmds = {
+        "status": cmd_status,
+        "sync": cmd_sync,
+        "list": cmd_list,
+        "read": cmd_read,
+        "summarize": cmd_summarize,
+        "send": cmd_send,
+        "config": cmd_config,
+    }
+
+    cmd_fn = cmds.get(args.command)
+    if cmd_fn:
+        return cmd_fn(args)
+    else:
+        parser.print_help()
+        return 1
+
+if __name__ == "__main__":
+    sys.exit(main() or 0)

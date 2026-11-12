@@ -53,11 +53,12 @@ Item {
   // Dynamic Persistent Milo Scratchpad & Calendar
   property bool scratchpadModalOpen: false
   property string scratchpadFilter: "all"  // "all" | "pending" | "completed"
-  property string midLeftTab: "tasks"      // "tasks" | "agenda"
+  property string midLeftTab: "tasks"      // "tasks" | "agenda" | "mail"
   property bool tasksWrapAll: false
   property bool modalTasksWrapAll: false
   property int expandedDeskTaskIndex: -1
   property int expandedModalTaskIndex: -1
+  property var mailData: ({ "unread_count": 0, "emails": [] })
   property var agendaList: []
   property var worktimeData: ({
     start: "09:00",
@@ -101,6 +102,23 @@ Item {
   function removeAgendaEvent(id) {
     if (quickCmdProc.running) quickCmdProc.running = false
     quickCmdProc.command = [root.homeDir + "/.local/bin/milo-calendar", "rm", id.toString()]
+    quickCmdProc.running = true
+  }
+
+  function mailSync() {
+    if (quickCmdProc.running) quickCmdProc.running = false
+    quickCmdProc.command = [root.homeDir + "/.local/bin/milo-mail", "sync"]
+    quickCmdProc.running = true
+  }
+
+  function mailSummarize() {
+    quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Gmail AI Briefing", root.homeDir + "/.local/bin/milo-mail", "summarize"]
+    quickCmdProc.running = true
+  }
+
+  function mailOpenWeb() {
+    if (quickCmdProc.running) quickCmdProc.running = false
+    quickCmdProc.command = ["xdg-open", "https://mail.google.com"]
     quickCmdProc.running = true
   }
 
@@ -263,6 +281,22 @@ Item {
     }
   }
 
+  FileView {
+    id: mailFile
+    path: root.homeDir + "/.local/share/milo/mail/inbox.json"
+    watchChanges: true
+    printErrors: false
+    onLoaded: {
+      try {
+        var raw = text().trim()
+        if (raw) {
+          var md = JSON.parse(raw)
+          if (md && typeof md === 'object') root.mailData = md
+        }
+      } catch(e) {}
+    }
+  }
+
   // Milo Scratchpad Modal External IPC Trigger
   FileView {
     id: scratchpadTriggerWatcher
@@ -294,6 +328,9 @@ Item {
           } else if (act === "open_tasks") {
             root.midLeftTab = "tasks"
             root.scratchpadModalOpen = true
+          } else if (act === "open_mail") {
+            root.midLeftTab = "mail"
+            root.scratchpadModalOpen = true
           } else if (act === "update" || act === "update_agenda") {
             // Trigger todos reload from disk
             var rawJson = todosFile.text().trim()
@@ -310,6 +347,11 @@ Item {
             if (rawWt) {
               var wtObj = JSON.parse(rawWt)
               if (wtObj && typeof wtObj === 'object') root.worktimeData = wtObj
+            }
+            var rawMail = mailFile.text().trim()
+            if (rawMail) {
+              var mObj = JSON.parse(rawMail)
+              if (mObj && typeof mObj === 'object') root.mailData = mObj
             }
           }
         }
@@ -1911,6 +1953,35 @@ Item {
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
                   root.midLeftTab = "agenda"
+                }
+              }
+            }
+
+            // Mail Pill in HUD Header
+            Rectangle {
+              height: 20
+              width: hudMailLabel.implicitWidth + 8
+              radius: 4
+              color: root.mailData && root.mailData.unread_count > 0 ? Qt.rgba(1.0, 0.67, 0.0, 0.25) : Qt.rgba(1, 1, 1, 0.08)
+              border.color: root.mailData && root.mailData.unread_count > 0 ? "#ffaa00" : Qt.rgba(1, 1, 1, 0.2)
+              border.width: 1
+
+              Text {
+                id: hudMailLabel
+                anchors.centerIn: parent
+                text: root.mailData && root.mailData.unread_count > 0 ? ("✉ " + root.mailData.unread_count) : "✉"
+                color: root.mailData && root.mailData.unread_count > 0 ? "#ffaa00" : Qt.rgba(1, 1, 1, 0.45)
+                font.pixelSize: 8
+                font.bold: true
+                font.family: "monospace"
+              }
+
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                  root.midLeftTab = "mail"
+                  root.scratchpadModalOpen = true
                 }
               }
             }
@@ -4079,11 +4150,14 @@ Item {
             root.scratchpadModalOpen = false
             event.accepted = true
           } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
-            root.midLeftTab = (root.midLeftTab === "tasks" ? "agenda" : "tasks")
             if (root.midLeftTab === "tasks") {
-              modalTaskInput.forceActiveFocus()
-            } else {
+              root.midLeftTab = "agenda"
               modalAgendaInput.forceActiveFocus()
+            } else if (root.midLeftTab === "agenda") {
+              root.midLeftTab = "mail"
+            } else {
+              root.midLeftTab = "tasks"
+              modalTaskInput.forceActiveFocus()
             }
             event.accepted = true
           }
@@ -4097,7 +4171,7 @@ Item {
           height: 540
           radius: 14
           color: Qt.rgba(0.06, 0.01, 0.02, 0.96)
-          border.color: root.midLeftTab === "agenda" ? "#00f0ff" : "#ff0838"
+          border.color: root.midLeftTab === "mail" ? "#ffaa00" : (root.midLeftTab === "agenda" ? "#00f0ff" : "#ff0838")
           border.width: 1.5
 
         // Prevent click-through
@@ -4166,6 +4240,53 @@ Item {
                   }
                 }
               }
+
+              // Mail Tab Button (Modal)
+              Rectangle {
+                height: 26
+                width: modalMailTabLabel.implicitWidth + (root.mailData && root.mailData.unread_count > 0 ? 34 : 16)
+                radius: 5
+                color: root.midLeftTab === "mail" ? "#ffaa00" : Qt.rgba(1.0, 0.67, 0.0, 0.15)
+                border.color: root.midLeftTab === "mail" ? "#ffffff" : Qt.rgba(1.0, 0.67, 0.0, 0.4)
+                border.width: 1
+
+                RowLayout {
+                  anchors.centerIn: parent
+                  spacing: 5
+                  Text {
+                    id: modalMailTabLabel
+                    text: "✉ GMAIL"
+                    color: root.midLeftTab === "mail" ? "#060102" : "#ffd480"
+                    font.pixelSize: 11
+                    font.bold: true
+                    font.family: "monospace"
+                  }
+                  Rectangle {
+                    visible: root.mailData && root.mailData.unread_count > 0
+                    height: 14
+                    width: mailBadgeNum.implicitWidth + 6
+                    radius: 7
+                    color: "#ff0838"
+                    Text {
+                      id: mailBadgeNum
+                      anchors.centerIn: parent
+                      text: root.mailData && root.mailData.unread_count ? root.mailData.unread_count.toString() : "0"
+                      color: "#ffffff"
+                      font.pixelSize: 8
+                      font.bold: true
+                      font.family: "monospace"
+                    }
+                  }
+                }
+
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: {
+                    root.midLeftTab = "mail"
+                  }
+                }
+              }
             }
 
             Item { Layout.fillWidth: true }
@@ -4175,14 +4296,22 @@ Item {
               height: 24
               width: counterText.implicitWidth + 16
               radius: 5
-              color: root.midLeftTab === "agenda" ? Qt.rgba(0, 0.9, 1.0, 0.2) : Qt.rgba(1, 0.03, 0.22, 0.2)
-              border.color: root.midLeftTab === "agenda" ? Qt.rgba(0, 0.9, 1.0, 0.5) : Qt.rgba(1, 0.03, 0.22, 0.5)
+              color: root.midLeftTab === "mail" ? Qt.rgba(1.0, 0.67, 0.0, 0.2) : (root.midLeftTab === "agenda" ? Qt.rgba(0, 0.9, 1.0, 0.2) : Qt.rgba(1, 0.03, 0.22, 0.2))
+              border.color: root.midLeftTab === "mail" ? Qt.rgba(1.0, 0.67, 0.0, 0.5) : (root.midLeftTab === "agenda" ? Qt.rgba(0, 0.9, 1.0, 0.5) : Qt.rgba(1, 0.03, 0.22, 0.5))
               border.width: 1
               Text {
                 id: counterText
                 anchors.centerIn: parent
-                text: root.midLeftTab === "agenda" ? (root.agendaList.length + " EVENTS TODAY") : (root.countDoneTodos() + "/" + root.todosList.length + " COMPLETED")
-                color: root.midLeftTab === "agenda" ? "#80f5ff" : "#ff8899"
+                text: {
+                  if (root.midLeftTab === "mail") {
+                    return (root.mailData && root.mailData.unread_count ? root.mailData.unread_count : 0) + " UNREAD"
+                  } else if (root.midLeftTab === "agenda") {
+                    return root.agendaList.length + " EVENTS TODAY"
+                  } else {
+                    return root.countDoneTodos() + "/" + root.todosList.length + " COMPLETED"
+                  }
+                }
+                color: root.midLeftTab === "mail" ? "#ffd480" : (root.midLeftTab === "agenda" ? "#80f5ff" : "#ff8899")
                 font.pixelSize: 10
                 font.bold: true
                 font.family: "monospace"
@@ -4192,8 +4321,8 @@ Item {
             // Close button
             Rectangle {
               width: 24; height: 24; radius: 5
-              color: root.midLeftTab === "agenda" ? Qt.rgba(0, 0.9, 1.0, 0.2) : Qt.rgba(1, 0.03, 0.22, 0.2)
-              border.color: root.midLeftTab === "agenda" ? "#00f0ff" : "#ff0838"
+              color: root.midLeftTab === "mail" ? Qt.rgba(1.0, 0.67, 0.0, 0.2) : (root.midLeftTab === "agenda" ? Qt.rgba(0, 0.9, 1.0, 0.2) : Qt.rgba(1, 0.03, 0.22, 0.2))
+              border.color: root.midLeftTab === "mail" ? "#ffaa00" : (root.midLeftTab === "agenda" ? "#00f0ff" : "#ff0838")
               border.width: 1
               Text {
                 anchors.centerIn: parent
@@ -5220,6 +5349,383 @@ Item {
                 font.family: "system-ui, sans-serif"
                 elide: Text.ElideRight
                 wrapMode: Text.NoWrap
+              }
+            }
+          }
+
+          // ==================================================================
+          // MODAL VIEW 3: GMAIL INBOX (visible when midLeftTab === "mail")
+          // ==================================================================
+          // 1. Mail Action Bar
+          RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+            visible: root.midLeftTab === "mail"
+
+            Rectangle {
+              height: 24
+              width: mailUserBadge.implicitWidth + 14
+              radius: 4
+              color: Qt.rgba(1.0, 0.67, 0.0, 0.15)
+              border.color: Qt.rgba(1.0, 0.67, 0.0, 0.4)
+              border.width: 1
+
+              Text {
+                id: mailUserBadge
+                anchors.centerIn: parent
+                text: root.mailData && root.mailData.user ? ("👤 " + root.mailData.user) : "⚠ Gmail Not Configured"
+                color: root.mailData && root.mailData.user ? "#ffd480" : "#ff8899"
+                font.pixelSize: 10
+                font.bold: true
+                font.family: "monospace"
+              }
+            }
+
+            Item { Layout.fillWidth: true }
+
+            // Sync Button
+            Rectangle {
+              height: 24
+              width: mailSyncLabel.implicitWidth + 14
+              radius: 4
+              color: Qt.rgba(0.08, 0.14, 0.2, 0.6)
+              border.color: Qt.rgba(1.0, 0.67, 0.0, 0.4)
+              border.width: 1
+
+              Text {
+                id: mailSyncLabel
+                anchors.centerIn: parent
+                text: "🔄 Sync"
+                color: "#ffffff"
+                font.pixelSize: 9
+                font.family: "monospace"
+              }
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.mailSync()
+              }
+            }
+
+            // AI Briefing Button
+            Rectangle {
+              height: 24
+              width: mailBriefLabel.implicitWidth + 14
+              radius: 4
+              color: Qt.rgba(1.0, 0.67, 0.0, 0.2)
+              border.color: "#ffaa00"
+              border.width: 1
+
+              Text {
+                id: mailBriefLabel
+                anchors.centerIn: parent
+                text: "✦ AI Briefing"
+                color: "#ffaa00"
+                font.pixelSize: 9
+                font.bold: true
+                font.family: "monospace"
+              }
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.mailSummarize()
+              }
+            }
+
+            // Open Webmail Button
+            Rectangle {
+              height: 24
+              width: mailWebLabel.implicitWidth + 14
+              radius: 4
+              color: Qt.rgba(0.2, 0.05, 0.08, 0.6)
+              border.color: Qt.rgba(1, 0.2, 0.3, 0.4)
+              border.width: 1
+
+              Text {
+                id: mailWebLabel
+                anchors.centerIn: parent
+                text: "🌐 Webmail"
+                color: Qt.rgba(1, 1, 1, 0.8)
+                font.pixelSize: 9
+                font.family: "monospace"
+              }
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.mailOpenWeb()
+              }
+            }
+          }
+
+          // 2. Email List ScrollView
+          ScrollView {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            clip: true
+            visible: root.midLeftTab === "mail"
+
+            ColumnLayout {
+              width: modalBox.width - 36
+              spacing: 6
+
+              // Empty or Not Configured State
+              Item {
+                Layout.fillWidth: true
+                height: 240
+                visible: !root.mailData || !root.mailData.user || !root.mailData.emails || root.mailData.emails.length === 0
+
+                Rectangle {
+                  anchors.centerIn: parent
+                  width: Math.min(520, parent.width - 20)
+                  height: 220
+                  radius: 10
+                  color: Qt.rgba(0.08, 0.05, 0.02, 0.8)
+                  border.color: (!root.mailData || !root.mailData.user) ? Qt.rgba(1.0, 0.67, 0.0, 0.4) : Qt.rgba(0, 1.0, 0.5, 0.4)
+                  border.width: 1.2
+
+                  ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 16
+                    spacing: 8
+
+                    Text {
+                      text: (!root.mailData || !root.mailData.user) ? "✉ GMAIL SETUP (Option A: 60-Second Setup)" : "✔ INBOX ZERO"
+                      color: (!root.mailData || !root.mailData.user) ? "#ffaa00" : "#00ff88"
+                      font.pixelSize: 13
+                      font.bold: true
+                      font.family: "monospace"
+                    }
+
+                    Text {
+                      Layout.fillWidth: true
+                      text: (!root.mailData || !root.mailData.user) ?
+                        "Connect your Gmail to Milo using a Google App Password:\n\n" +
+                        "1. Open https://myaccount.google.com/apppasswords\n" +
+                        "2. Create an App Password for 'Milo' (16 characters)\n" +
+                        "3. Save to ~/.config/milo/mail.env:\n" +
+                        "     GMAIL_USER=\"youremail@gmail.com\"\n" +
+                        "     GMAIL_APP_PASSWORD=\"xxxx xxxx xxxx xxxx\"\n" +
+                        "4. Click [ 🔄 Sync ] above or run 'milo-mail status'" :
+                        "All clear! Zero unread emails in your Gmail inbox.\n\nMilo will notify you automatically when new emails arrive."
+                      color: Qt.rgba(1, 1, 1, 0.8)
+                      font.pixelSize: 10
+                      font.family: "system-ui, sans-serif"
+                      wrapMode: Text.Wrap
+                    }
+
+                    Item { Layout.fillHeight: true }
+
+                    RowLayout {
+                      spacing: 8
+                      Rectangle {
+                        visible: !root.mailData || !root.mailData.user
+                        height: 26
+                        width: secBtnLabel.implicitWidth + 16
+                        radius: 4
+                        color: "#ffaa00"
+                        Text {
+                          id: secBtnLabel
+                          anchors.centerIn: parent
+                          text: "🔑 Open Google Security Settings"
+                          color: "#060102"
+                          font.pixelSize: 10
+                          font.bold: true
+                          font.family: "monospace"
+                        }
+                        MouseArea {
+                          anchors.fill: parent
+                          cursorShape: Qt.PointingHandCursor
+                          onClicked: {
+                            if (quickCmdProc.running) quickCmdProc.running = false
+                            quickCmdProc.command = ["xdg-open", "https://myaccount.google.com/apppasswords"]
+                            quickCmdProc.running = true
+                          }
+                        }
+                      }
+
+                      Rectangle {
+                        height: 26
+                        width: testBtnLabel.implicitWidth + 16
+                        radius: 4
+                        color: Qt.rgba(1, 1, 1, 0.12)
+                        border.color: Qt.rgba(1, 1, 1, 0.3)
+                        border.width: 1
+                        Text {
+                          id: testBtnLabel
+                          anchors.centerIn: parent
+                          text: "🔄 Test Connection"
+                          color: "#ffffff"
+                          font.pixelSize: 10
+                          font.family: "monospace"
+                        }
+                        MouseArea {
+                          anchors.fill: parent
+                          cursorShape: Qt.PointingHandCursor
+                          onClicked: root.mailSync()
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+
+              // Email Cards Repeater
+              Repeater {
+                model: root.mailData && root.mailData.emails ? root.mailData.emails : []
+                delegate: Rectangle {
+                  required property var modelData
+                  required property int index
+                  Layout.fillWidth: true
+                  height: 56
+                  radius: 7
+                  color: Qt.rgba(0.12, 0.08, 0.02, 0.75)
+                  border.color: Qt.rgba(1.0, 0.67, 0.0, 0.35)
+                  border.width: 1
+
+                  ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    spacing: 3
+
+                    RowLayout {
+                      Layout.fillWidth: true
+                      spacing: 6
+
+                      Text {
+                        text: "✉"
+                        color: "#ffaa00"
+                        font.pixelSize: 10
+                      }
+
+                      Text {
+                        text: modelData.from || "Unknown Sender"
+                        color: "#ffd480"
+                        font.pixelSize: 10
+                        font.bold: true
+                        font.family: "system-ui, sans-serif"
+                        elide: Text.ElideRight
+                        Layout.maximumWidth: 220
+                      }
+
+                      Item { Layout.fillWidth: true }
+
+                      Text {
+                        text: modelData.time_rel || ""
+                        color: Qt.rgba(1, 1, 1, 0.45)
+                        font.pixelSize: 9
+                        font.family: "monospace"
+                      }
+                    }
+
+                    Text {
+                      Layout.fillWidth: true
+                      text: modelData.subject || "(No Subject)"
+                      color: "#ffffff"
+                      font.pixelSize: 10
+                      font.bold: true
+                      font.family: "system-ui, sans-serif"
+                      elide: Text.ElideRight
+                    }
+
+                    Text {
+                      Layout.fillWidth: true
+                      text: modelData.snippet || ""
+                      color: Qt.rgba(1, 1, 1, 0.5)
+                      font.pixelSize: 9
+                      font.family: "system-ui, sans-serif"
+                      elide: Text.ElideRight
+                    }
+                  }
+
+                  MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                      quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Email #" + modelData.id, root.homeDir + "/.local/bin/milo-mail", "read", modelData.id]
+                      quickCmdProc.running = true
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // 3. Milo AI Mail Copilot Strip
+          Rectangle {
+            Layout.fillWidth: true
+            height: 68
+            radius: 8
+            color: Qt.rgba(0.08, 0.05, 0.02, 0.75)
+            border.color: Qt.rgba(1.0, 0.67, 0.0, 0.35)
+            border.width: 1
+            visible: root.midLeftTab === "mail"
+
+            ColumnLayout {
+              anchors.fill: parent
+              anchors.margins: 6
+              spacing: 4
+
+              RowLayout {
+                Layout.fillWidth: true
+                spacing: 6
+
+                Text {
+                  text: "🤖 MILO GMAIL COPILOT"
+                  color: "#ffaa00"
+                  font.pixelSize: 9
+                  font.bold: true
+                  font.family: "monospace"
+                }
+
+                Item { Layout.fillWidth: true }
+
+                Repeater {
+                  model: [
+                    { label: "🎙 AI Briefing", cmd: "summarize" },
+                    { label: "🔄 Sync Now", cmd: "sync" },
+                    { label: "📋 Terminal List", cmd: "list" }
+                  ]
+                  delegate: Rectangle {
+                    required property var modelData
+                    height: 18
+                    width: chipMailText.implicitWidth + 10
+                    radius: 3
+                    color: Qt.rgba(1.0, 0.67, 0.0, 0.15)
+                    border.color: Qt.rgba(1.0, 0.67, 0.0, 0.4)
+                    border.width: 1
+                    Text {
+                      id: chipMailText
+                      anchors.centerIn: parent
+                      text: modelData.label
+                      color: "#ffd480"
+                      font.pixelSize: 8
+                      font.family: "monospace"
+                    }
+                    MouseArea {
+                      anchors.fill: parent
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: {
+                        if (modelData.cmd === "summarize") {
+                          root.mailSummarize()
+                        } else if (modelData.cmd === "sync") {
+                          root.mailSync()
+                        } else {
+                          quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Gmail Inbox", root.homeDir + "/.local/bin/milo-mail", "list"]
+                          quickCmdProc.running = true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+
+              Text {
+                Layout.fillWidth: true
+                text: "Say: 'Milo, check my mail' or 'Milo, summarize my unread emails' for instant voice triage."
+                color: Qt.rgba(1, 1, 1, 0.5)
+                font.pixelSize: 9
+                font.family: "system-ui, sans-serif"
+                elide: Text.ElideRight
               }
             }
           }

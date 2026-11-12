@@ -1,0 +1,9 @@
+[Unit]
+Description=Milo Sovereign Gmail Sync Service
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/jeffy/.local/bin/milo-mail sync --quiet
+StandardOutput=journal
+StandardError=journal
