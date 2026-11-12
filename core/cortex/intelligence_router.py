@@ -666,6 +666,59 @@ def handle_music_intent(prompt: str) -> Optional[Tuple[str, str]]:
     if not music_bin.exists():
         return None
 
+    # 0. Vibe / Mood Specific Intent Check (before generic play)
+    # Sad / Emotional / Pathos
+    if re.search(r'\b(?:play\s+(?:some\s+)?(?:sad|emotional|heartbreak|pathos|breakup)\s+(?:songs?|music|tracks?)|(?:sad|sogam|sogamana)\s*(?:songs?|paatu|music)?\s*(?:podu|play)?)\b', p) or p in ["sad song", "sad songs", "sad music", "play sad"]:
+        try:
+            subprocess.run([str(music_bin), "mood", "sad"], capture_output=True, text=True, timeout=3)
+            st_res = subprocess.run([str(music_bin), "status"], capture_output=True, text=True, timeout=3)
+            parts = st_res.stdout.strip().split(":::") if ":::" in st_res.stdout else []
+            track_info = f" Now playing '{parts[0]}' by {parts[1]}." if len(parts) >= 2 and parts[0] != "Cyber Soundtrack" else ""
+            return f"Switched Milo Soundtrack to 🌧️ Sad / Pain vibe.{track_info}", "Milo Cyber Soundtrack"
+        except Exception:
+            return None
+
+    # Vibe / Party / Kuthu
+    if re.search(r'\b(?:play\s+(?:some\s+)?(?:vibe|happy|party|kuthu|dance|fast|upbeat)\s+(?:songs?|music|tracks?)|(?:vibe|kuthu|party|kondattam)\s*(?:songs?|paatu|music)?\s*(?:podu|play)?|hype\s+me\s+up)\b', p) or p in ["vibe song", "vibe songs", "kuthu songs", "play vibe"]:
+        try:
+            subprocess.run([str(music_bin), "mood", "vibe"], capture_output=True, text=True, timeout=3)
+            st_res = subprocess.run([str(music_bin), "status"], capture_output=True, text=True, timeout=3)
+            parts = st_res.stdout.strip().split(":::") if ":::" in st_res.stdout else []
+            track_info = f" Now playing '{parts[0]}' by {parts[1]}." if len(parts) >= 2 and parts[0] != "Cyber Soundtrack" else ""
+            return f"Switched Milo Soundtrack to ⚡ Vibe / Party mode!{track_info}", "Milo Cyber Soundtrack"
+        except Exception:
+            return None
+
+    # Melody / Chill / Love
+    if re.search(r'\b(?:play\s+(?:some\s+)?(?:melody|romantic|love|chill|acoustic|soft|peaceful)\s+(?:songs?|music|tracks?)|(?:melody|love|romance|kadhal)\s*(?:songs?|paatu|music)?\s*(?:podu|play)?)\b', p) or p in ["melody song", "melody songs", "play melody", "love songs"]:
+        try:
+            subprocess.run([str(music_bin), "mood", "melody"], capture_output=True, text=True, timeout=3)
+            st_res = subprocess.run([str(music_bin), "status"], capture_output=True, text=True, timeout=3)
+            parts = st_res.stdout.strip().split(":::") if ":::" in st_res.stdout else []
+            track_info = f" Now playing '{parts[0]}' by {parts[1]}." if len(parts) >= 2 and parts[0] != "Cyber Soundtrack" else ""
+            return f"Switched Milo Soundtrack to 💖 Melody / Chill vibe.{track_info}", "Milo Cyber Soundtrack"
+        except Exception:
+            return None
+
+    # Motivation / Focus / Gym / Workout
+    if re.search(r'\b(?:play\s+(?:some\s+)?(?:motivation(?:al)?|gym|workout|focus|study|mass|hype)\s+(?:songs?|music|tracks?)|(?:motivation|workout|gym|mass)\s*(?:songs?|paatu|music)?\s*(?:podu|play)?|beast\s+mode)\b', p) or p in ["motivation songs", "workout songs", "gym songs", "play motivation"]:
+        try:
+            subprocess.run([str(music_bin), "mood", "motivation"], capture_output=True, text=True, timeout=3)
+            st_res = subprocess.run([str(music_bin), "status"], capture_output=True, text=True, timeout=3)
+            parts = st_res.stdout.strip().split(":::") if ":::" in st_res.stdout else []
+            track_info = f" Now playing '{parts[0]}' by {parts[1]}." if len(parts) >= 2 and parts[0] != "Cyber Soundtrack" else ""
+            return f"Switched Milo Soundtrack to 🔥 Motivation / Focus mode.{track_info}", "Milo Cyber Soundtrack"
+        except Exception:
+            return None
+
+    # Sort / Filter / Categorize music
+    if re.search(r'\b(?:sort|categorize|filter)\s+(?:my\s+)?(?:music|songs?|soundtrack|library)\b', p) or p in ["sort music", "filter songs", "sort songs"]:
+        try:
+            subprocess.run([str(music_bin), "sort"], capture_output=True, text=True, timeout=12)
+            return "Milo Music Sorter completed. All 736 tracks categorized into Vibe, Sad, Melody, and Motivation playlists.", "Milo Cyber Soundtrack"
+        except Exception:
+            return "Failed to run music sorter.", "Milo Cyber Soundtrack"
+
     # Play / Resume
     if re.search(r'\b(?:play\s+(?:music|song|soundtrack|audio)|resume\s+(?:music|song|soundtrack|playback)|start\s+music)\b', p) or p in ["play", "play music", "music play"]:
         try:

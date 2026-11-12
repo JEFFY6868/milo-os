@@ -1,0 +1,361 @@
+#!/usr/bin/env python3
+"""
+milo-music-sorter: Cyber Vibe & Mood Classifier for MiloOS Soundtrack
+Part of MiloOS. Built for Arch Linux & Wayland Desktop HUD.
+
+Classifies local audio tracks in ~/Music into 4 primary vibes:
+  - ⚡ vibe: High energy, Kuthu, Party, Gaana, Dance, Upbeat
+  - 🌧️ sad: Pathos, Heartbreak, Pain, Sorrow, Lullaby, Separation
+  - 💖 melody: Romance, Acoustic, Breezy, Soul, Chill, Soft, Nostalgic
+  - 🔥 motivation: Climax themes, Workout, Focus, High-energy Mass, Anthem
+
+Generates playlists in ~/.config/milo/playlists/:
+  - vibe.m3u
+  - sad.m3u
+  - melody.m3u
+  - motivation.m3u
+  - all.m3u
+"""
+
+import os
+import sys
+import re
+import json
+import random
+from pathlib import Path
+
+MUSIC_DIR = Path.home() / "Music"
+CONFIG_DIR = Path.home() / ".config/milo"
+PLAYLISTS_DIR = CONFIG_DIR / "playlists"
+VIBES_CACHE_FILE = CONFIG_DIR / "music_vibes.json"
+OVERRIDES_FILE = CONFIG_DIR / "vibe_overrides.json"
+
+# Core Vibe Taxonomy
+MOOD_LABELS = {
+    "vibe": "⚡ Vibe / Party",
+    "sad": "🌧️ Sad / Pain",
+    "melody": "💖 Melody / Chill",
+    "motivation": "🔥 Motivation / Focus"
+}
+
+# Regex patterns for Tamil & general soundtrack classification
+SAD_PATTERNS = [
+    r'\bsad\b', r'\bpain\b', r'\btears\b', r'\bheartbreak\b', r'\bvaliyil\b', r'\bpirivu\b',
+    r'\bthanimai\b', r'\bpathos\b', r'\blullaby\b', r'\baariraro\b', r'\baarariraro\b', r'\baariro\b',
+    r'\bpo nee po\b', r'\bkanave\b', r'\bbreakup\b', r'\balone\b', r'\bpogathey\b', r'\bmaranthu\b',
+    r'\bsogam\b', r'\birul\b', r'\bmaranam\b', r'\bverumai\b', r'\bvidai\b', r'\btholaivil\b',
+    r'\bamma amma\b', r'\bjodi nilave\b', r'\baddress song\b', r'\bidhayathai yedho\b',
+    r'\bheart break\b', r'\bkadhal valarthen\b', r'\bkaadhal yen\b', r'\bkaalame\b', r'\bkadal raasa\b',
+    r'\bnee yaaro\b', r'\bnenjai kasaki\b', r'\bnizhalinai\b', r'\boru kili\b', r'\bpogathe\b',
+    r'\bthe heart break\b', r'\bthodu vaanam\b', r'\busure\b', r'\byedho ondru\b', r'\bellu vaya\b',
+    r'\bvalikidhe\b', r'\bkannukkul\b', r'\bazhugai\b', r'\bthooram\b', r'\bkaathirunthen\b',
+    r'\bpirivom\b', r'\bkanneer\b', r'\bkanneeril\b', r'\bsogama\b', r'\bunmai orunaal\b',
+    r'\baiyo kadhaley\b', r'\bariyadha vayasu\b', r'\bathilaga\b', r'\bennodu nee irundhal\b',
+    r'\bninaithu ninaithu\b', r'\boru naalil\b', r'\bpanithuli\b', r'\bpirai thedum\b',
+    r'\brathamaarey\b', r'\bsiragugal\b', r'\bthaimai\b', r'\bun perai sollum\b',
+    r'\bunakkul naane\b', r'\bvizhi moodi\b', r'\byaaro manadhile\b', r'\ben frienda pola\b',
+    r'\bthe pain of tamizh\b', r'\bvenmegam\b', r'\bmaruvaarthai pesadhey\b', r'\bthanimaye\b',
+    r'\bthaaye thaaye\b', r'\bori nodi\b', r'\buyir pirindha\b', r'\bidhayathai karaikirathe\b',
+    r'\bkaathirundhen\b', r'\bthe destiny\b', r'\btrain station scene\b', r'\boru kalluriyin\b',
+    r'\bpesugiren pesugiren\b', r'\bkaatrukulle\b', r'\bunmai sonnal\b', r'\bidhu varai illadha\b',
+    r'\buyire uyire\b', r'\bnenje nenje\b', r'\bvizhiyil un vizhiyil\b', r'\baaruyire\b',
+    r'\baagasa veeran\b', r'\bambikapathy\b', r'\bagasatha\b', r'\bava enna enna\b',
+    r'\bazha thonudhe\b', r'\bkannukkulle\b', r'\bmaraindhu\b', r'\bpirinthom\b', r'\bvaliye\b'
+]
+
+MOTIVATION_PATTERNS = [
+    r'\btheme\b', r'\bmass\b', r'\bfire\b', r'\broar\b', r'\banthem\b', r'\bsurvivor\b',
+    r'\bvetri\b', r'\bsingam\b', r'\brise\b', r'\bpower\b', r'\bclimax\b', r'\bcharge\b',
+    r'\bneruppu da\b', r'\bbeast mode\b', r'\brolex\b', r'\bvikram\b', r'\bhukum\b',
+    r'\bbadass\b', r'\bmaster the blaster\b', r'\bnenje yezhu\b', r'\bneeye oli\b',
+    r'\bthe rise of karuppu\b', r'\bkaali theme\b', r'\bjagdish on mission\b', r'\bnimirnthu nil\b',
+    r'\bsurviva\b', r'\bbullet song\b', r'\bthalaivar\b', r'\bleo\b', r'\bbloody sweet\b',
+    r'\border\b', r'\blokiverse\b', r'\badaavadi\b', r'\badadada arrambame\b', r'\bnee singam dhan\b',
+    r'\bthani oruvan\b', r'\bthani vazhi\b', r'\bthotta power\b', r'\bulagam oruvanukka\b',
+    r'\bjana gana mana\b', r'\bvetri kodi kattu\b', r'\bveera\b', r'\baarambam\b',
+    r'\barjun makes nani proud\b', r'\bmaara theme\b', r'\bvalimai theme\b', r'\bviswasam theme\b',
+    r'\bbilla theme\b', r'\bmankatha theme\b', r'\bpetta paraak\b', r'\bvaathi kabaddi\b',
+    r'\bdub theri step\b', r'\bporkanda singam\b', r'\bporattom\b', r'\bveeran\b', r'\byuddham\b',
+    r'\bthalaiva\b', r'\bnayagan\b', r'\bblaster\b', r'\bscream\b', r'\bwarrior\b', r'\barmy\b',
+    r'\bmission\b', r'\bak the tiger\b', r'\bjujubee\b', r'\btheemai dhaan vellum\b',
+    r'\bthalaivar anthem\b', r'\bog sambavam\b', r'\bvanga machan vanga\b', r'\bedhirthu nil\b',
+    r'\boruvan oruvan mudhalali\b', r'\bchariot fight\b', r'\basuran theme\b', r'\bmaster raid\b',
+    r'\bbigil bigil bigiluma\b', r'\bbigil theme\b', r'\bkabali theme\b', r'\bkaithi theme\b',
+    r'\bjailer theme\b', r'\bbgm\b', r'\balappara\b', r'\bveera thamizhan\b', r'\bmaaran\b',
+    r'\bvettayan\b', r'\bdeva theme\b', r'\bthalapathy thalapathy\b', r'\bthe boys are back\b'
+]
+
+VIBE_PATTERNS = [
+    r'\bkuthu\b', r'\bparty\b', r'\bdance\b', r'\bdappu\b', r'\bjalsa\b', r'\bbeat\b', r'\bdj\b',
+    r'\bremix\b', r'\bgaana\b', r'\blocal\b', r'\bbaila\b', r'\baaluma doluma\b', r'\badhaaru adhaaru\b',
+    r'\bjalabulajangu\b', r'\bkaavaalaa\b', r'\bnaanga vera maari\b', r'\bverithanam\b',
+    r'\bvaathi coming\b', r'\barabic kuthu\b', r'\bsodakku\b', r'\bchellamma\b', r'\bmarana mass\b',
+    r'\bprivate party\b', r'\bwhy this kolaveri di\b', r'\bkolaveri\b', r'\bdanga maari\b',
+    r'\bselfie pulla\b', r'\browdy baby\b', r'\btasakku tasakku\b', r'\btaakkunu\b', r'\bchumma kizhi\b',
+    r'\brakita rakita\b', r'\bkutty story\b', r'\bvilayadu mangatha\b', r'\bjilla vittu\b',
+    r'\bjitthu jiladi\b', r'\baaha kalyanam\b', r'\baaja raja\b', r'\baambalaikum pombalaikum\b',
+    r'\baandipatti\b', r'\baathadi aathadi\b', r'\badi rakkamma rakku\b', r'\bailasa ailasa\b',
+    r'\balangaara pandhal\b', r'\balapuzha sandhayila\b', r'\bamma nah nah\b', r'\bammadi athadi\b',
+    r'\bandangkaka\b', r'\bantartica\b', r'\barakkiyae\b', r'\bappadi podu\b', r'\bopen the tasmac\b',
+    r'\bthirunelveli alvada\b', r'\bthirupachi aruvale\b', r'\bthangachi song\b', r'\bthattaan thattaan\b',
+    r'\bthunder kaaran\b', r'\btomato thakkali\b', r'\budhungada sangu\b', r'\bno money no honey\b',
+    r'\bnaa ready\b', r'\bpathala pathala\b', r'\bwasted\b', r'\bdonu donu\b', r'\bding dong\b',
+    r'\bkutti puli koottam\b', r'\bgoogle google\b', r'\bmersal arasan\b', r'\bquit pannuda\b',
+    r'\bpolakattum para para\b', r'\bchella kutti\b', r'\bjalsa pannungada\b', r'\bka ka ka po\b',
+    r'\bkaara aattakkaara\b', r'\bkaathalenum\b', r'\bkaathellam\b', r'\bkaathu vaakula rendu\b',
+    r'\bkaavaa ulla\b', r'\bjigar\b', r'\bjilpanso\b', r'\bdharala prabhu\b', r'\bmorrakka\b',
+    r'\bchillax\b', r'\bdhol\b', r'\bthiruvizha\b', r'\bkoothu\b', r'\bbambara\b', r'\bottagatha\b',
+    r'\bjalaba\b', r'\bkavala\b', r'\bparaak\b', r'\bthara local\b', r'\btappasu\b', r'\bdamakku\b',
+    r'\bguleba\b', r'\bkuchi\b', r'\bsarakku\b', r'\bbeer\b', r'\bdum\b', r'\btappu\b', r'\bthappu\b',
+    r'\bmachi\b', r'\bva da\b', r'\bnanba\b', r'\btasmac\b', r'\bchill bro\b', r'\bbad boy\b',
+    r'\bpakkam vanthu\b', r'\bwhat a karuvad\b', r'\bsenjitaley\b', r'\bsirikkadhey\b', r'\bhollywood\b',
+    r'\bhollywood kuthu\b', r'\blocal boy\b', r'\baalaporan thamizhan\b', r'\bballe lakka\b',
+    r'\bbahubalikku oru kattappa\b', r'\badhirudha\b', r'\bjithu jilladi\b', r'\bdandanakka\b',
+    r'\bkaruppu nerathazhagi\b', r'\bmachan meesa\b', r'\bkattipudi kattipudida\b', r'\bmakkagaya\b',
+    r'\bvaadi pulla vaadi\b', r'\bmersal\b', r'\bmarana\b', r'\bpodango\b', r'\blocal sarakku\b'
+]
+
+
+def clean_track_name(s: str) -> str:
+    """Clean filename by stripping MassTamilan/StarMusiQ domain tags and punctuation."""
+    s = re.sub(r'-(?:MassTamilan|StarMusiQ|Isaimini|TamilWire|123Musiq)(?:\.[a-z0-9]+)?', '', s, flags=re.I)
+    s = re.sub(r'\.(?:com|org|io|dev|fm|so|net|in)', '', s, flags=re.I)
+    s = re.sub(r'\[.*?\]|\(.*?\)', '', s)
+    s = re.sub(r'[_\-]+', ' ', s).strip()
+    return re.sub(r'\s+', ' ', s).strip()
+
+
+def parse_id3(path: Path) -> dict:
+    """Fast, pure Python ID3v2 tag parser (reads title, artist, album in <2ms)."""
+    tags = {}
+    try:
+        with open(path, 'rb') as f:
+            header = f.read(10)
+            if header[:3] != b'ID3':
+                return tags
+            version = header[3]
+            size = ((header[6] & 0x7F) << 21) | ((header[7] & 0x7F) << 14) | ((header[8] & 0x7F) << 7) | (header[9] & 0x7F)
+            data = f.read(size)
+            pos = 0
+            while pos < len(data) - 10:
+                frame_id = data[pos:pos+4].decode('latin1', errors='ignore')
+                if not frame_id.isalnum():
+                    break
+                frame_size = int.from_bytes(data[pos+4:pos+8], 'big')
+                if version == 4:
+                    frame_size = ((data[pos+4] & 0x7F) << 21) | ((data[pos+5] & 0x7F) << 14) | ((data[pos+6] & 0x7F) << 7) | (data[pos+7] & 0x7F)
+                pos += 10
+                if frame_size <= 0 or pos + frame_size > len(data):
+                    break
+                val_data = data[pos:pos+frame_size]
+                pos += frame_size
+                if frame_id in ('TIT2', 'TPE1', 'TALB'):
+                    encoding = val_data[0] if len(val_data) > 0 else 0
+                    raw = val_data[1:]
+                    val = ''
+                    if encoding == 0:
+                        val = raw.decode('latin1', errors='ignore').strip('\x00')
+                    elif encoding == 1:
+                        val = raw.decode('utf-16', errors='ignore').strip('\x00')
+                    elif encoding == 3:
+                        val = raw.decode('utf-8', errors='ignore').strip('\x00')
+                    tags[frame_id] = val
+    except Exception:
+        pass
+    return tags
+
+
+def load_overrides() -> dict:
+    if OVERRIDES_FILE.exists():
+        try:
+            return json.loads(OVERRIDES_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+def save_override(filename: str, mood: str):
+    overrides = load_overrides()
+    overrides[filename] = mood
+    OVERRIDES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    OVERRIDES_FILE.write_text(json.dumps(overrides, indent=2), encoding="utf-8")
+
+
+def classify_track(path: Path, overrides: dict = None) -> tuple:
+    """
+    Classify track into (mood, confidence, title, artist, album).
+    Returns mood in ('vibe', 'sad', 'melody', 'motivation').
+    """
+    if overrides is None:
+        overrides = load_overrides()
+
+    fn = path.name
+    if fn in overrides:
+        return overrides[fn], 1.0, clean_track_name(path.stem), "Unknown", "Unknown"
+
+    stem_clean = clean_track_name(path.stem).lower()
+    meta = parse_id3(path)
+    title = clean_track_name(meta.get("TIT2", path.stem))
+    artist = clean_track_name(meta.get("TPE1", "Unknown Artist"))
+    album = clean_track_name(meta.get("TALB", "Unknown Album"))
+
+    # Match primarily on title and filename to avoid album title bleed (e.g. Leo melodies)
+    text_to_match = f"{stem_clean} {title.lower()}"
+    if any(k in album.lower() for k in ("theme", "bgm", "ost", "score")):
+        text_to_match += f" {album.lower()}"
+
+    # 1. Check Sad
+    for pat in SAD_PATTERNS:
+        if re.search(pat, text_to_match):
+            return "sad", 0.95, title, artist, album
+
+    # 2. Check Motivation
+    for pat in MOTIVATION_PATTERNS:
+        if re.search(pat, text_to_match):
+            return "motivation", 0.92, title, artist, album
+
+    # 3. Check Vibe
+    for pat in VIBE_PATTERNS:
+        if re.search(pat, text_to_match):
+            return "vibe", 0.94, title, artist, album
+
+    # 4. Default to Melody (Romantic / Chill / Acoustic)
+    return "melody", 0.85, title, artist, album
+
+
+def scan_and_build(force_rescan: bool = False) -> dict:
+    """Scans ~/Music, classifies all tracks, and generates .m3u playlists."""
+    PLAYLISTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    exts = ("*.mp3", "*.flac", "*.wav", "*.m4a", "*.ogg")
+    tracks = []
+    for ext in exts:
+        tracks.extend(MUSIC_DIR.rglob(ext))
+
+    tracks = sorted(list(set(tracks)))
+    if not tracks:
+        print(f"No audio tracks found in {MUSIC_DIR}")
+        return {}
+
+    overrides = load_overrides()
+    catalog = {
+        "vibe": [],
+        "sad": [],
+        "melody": [],
+        "motivation": []
+    }
+    all_tracks_meta = []
+
+    for t in tracks:
+        mood, conf, title, artist, album = classify_track(t, overrides)
+        if mood not in catalog:
+            mood = "melody"
+        catalog[mood].append(t)
+        all_tracks_meta.append({
+            "path": str(t),
+            "filename": t.name,
+            "title": title,
+            "artist": artist,
+            "album": album,
+            "mood": mood,
+            "confidence": conf
+        })
+
+    # Write .m3u playlists
+    for mood, t_list in catalog.items():
+        m3u_path = PLAYLISTS_DIR / f"{mood}.m3u"
+        shuffled = list(t_list)
+        random.shuffle(shuffled)
+        with open(m3u_path, "w", encoding="utf-8") as f:
+            for item in shuffled:
+                f.write(str(item) + "\n")
+
+    # Also write all.m3u
+    all_m3u = PLAYLISTS_DIR / "all.m3u"
+    shuffled_all = list(tracks)
+    random.shuffle(shuffled_all)
+    with open(all_m3u, "w", encoding="utf-8") as f:
+        for item in shuffled_all:
+            f.write(str(item) + "\n")
+
+    # Save metadata JSON cache
+    cache_payload = {
+        "total_tracks": len(tracks),
+        "counts": {m: len(catalog[m]) for m in catalog},
+        "tracks": all_tracks_meta
+    }
+    VIBES_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    VIBES_CACHE_FILE.write_text(json.dumps(cache_payload, indent=2), encoding="utf-8")
+
+    return cache_payload
+
+
+def print_stats():
+    if not VIBES_CACHE_FILE.exists():
+        scan_and_build()
+
+    try:
+        data = json.loads(VIBES_CACHE_FILE.read_text(encoding="utf-8"))
+        counts = data.get("counts", {})
+        total = data.get("total_tracks", 0)
+
+        print("\033[1;36m" + "=" * 54 + "\033[0m")
+        print("  \033[1;37mMILO PROTOCOL // VIBE & MOOD MATRIX\033[0m")
+        print(f"  \033[1;32mTotal Tracks Grounded:\033[0m \033[1;37m{total}\033[0m")
+        print("\033[1;36m" + "-" * 54 + "\033[0m")
+        for m, label in MOOD_LABELS.items():
+            cnt = counts.get(m, 0)
+            pct = (cnt / total * 100) if total > 0 else 0
+            print(f"  {label:<28} : \033[1;33m{cnt:>4}\033[0m tracks ({pct:>5.1f}%)")
+        print("\033[1;36m" + "=" * 54 + "\033[0m")
+    except Exception as e:
+        print(f"Error reading stats: {e}")
+
+
+def list_mood(mood: str):
+    mood = mood.lower()
+    if mood not in MOOD_LABELS:
+        print(f"Unknown mood '{mood}'. Choose from: vibe, sad, melody, motivation")
+        return
+
+    m3u_path = PLAYLISTS_DIR / f"{mood}.m3u"
+    if not m3u_path.exists():
+        scan_and_build()
+
+    if m3u_path.exists():
+        lines = [line.strip() for line in m3u_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        print(f"\n{MOOD_LABELS[mood]} ({len(lines)} tracks):\n")
+        for idx, p in enumerate(lines[:40], 1):
+            print(f"  {idx:2d}. {clean_track_name(Path(p).stem)}")
+        if len(lines) > 40:
+            print(f"  ... and {len(lines) - 40} more tracks.")
+
+
+def main():
+    if len(sys.argv) < 2:
+        print_stats()
+        return
+
+    arg = sys.argv[1].lower()
+    if arg in ("--rescan", "rescan", "sort", "build"):
+        print("Scanning ~/Music and classifying soundtrack vibes...")
+        res = scan_and_build(force_rescan=True)
+        print_stats()
+    elif arg in ("--stats", "stats", "summary"):
+        print_stats()
+    elif arg in ("--list", "list") and len(sys.argv) > 2:
+        list_mood(sys.argv[2])
+    elif arg in ("--tag", "tag", "set") and len(sys.argv) > 3:
+        target = sys.argv[2]
+        mood = sys.argv[3].lower()
+        if mood in MOOD_LABELS:
+            save_override(target, mood)
+            print(f"Tagged '{target}' as {MOOD_LABELS[mood]}. Run 'milo-music-sorter rescan' to rebuild playlists.")
+        else:
+            print(f"Invalid mood: {mood}")
+    else:
+        print("Usage: milo-music-sorter [--rescan | --stats | --list <mood> | --tag <song> <mood>]")
+
+
+if __name__ == "__main__":
+    main()
