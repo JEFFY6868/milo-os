@@ -992,6 +992,7 @@ Item {
         "  • `game on / off`     : Toggle Zero-Click Gaming VRAM Dedication\n" +
         "  • `/wish <idea>`      : Thought-to-Code generator (synthesize tool)\n" +
         "  • `search <topic>`    : Instant live web grounding (DuckDuckGo 0.8s)\n" +
+        "  • `install <pkg>`     : Native package & application installer\n" +
         "  • `/look`             : Webcam optical sensor check\n" +
         "  • Plain text / speech : Direct Neural Cortex conversational intelligence"
       chatAutoDismissTimer.restart()
@@ -1008,6 +1009,59 @@ Item {
       if (evoProc.running) evoProc.running = false
       evoProc.command = ["/home/jeffy/.local/bin/milo-doctor"]
       evoProc.running = true
+      return
+    }
+
+    // 0.02 Milo Package Manager Intent (Install / Remove / Search / Update)
+    if (lower.startsWith("install ") || lower.startsWith("/install ") ||
+        lower.startsWith("milo install ") || lower.startsWith("milo-install ") ||
+        lower.startsWith("can you install ") || lower.startsWith("please install ") ||
+        lower.startsWith("could you install ") || lower.startsWith("get ") ||
+        lower.startsWith("setup ") || lower.startsWith("download and install ") ||
+        lower.startsWith("uninstall ") || lower.startsWith("/uninstall ") ||
+        lower.startsWith("remove ") || lower.startsWith("/remove ") ||
+        lower.startsWith("search package ") || lower.startsWith("find package ") ||
+        lower === "update packages" || lower === "update system" || lower === "upgrade system" ||
+        lower === "upgrade packages" || lower === "update software") {
+
+      var pkgAction = "install"
+      var targetPkg = ""
+
+      if (lower.startsWith("uninstall ") || lower.startsWith("/uninstall ") ||
+          lower.startsWith("remove ") || lower.startsWith("/remove ")) {
+        pkgAction = "remove"
+        targetPkg = raw.replace(/^(?:\/uninstall|\/remove|uninstall|remove)\s+/i, "").trim()
+      } else if (lower.indexOf("update") !== -1 || lower.indexOf("upgrade") !== -1) {
+        pkgAction = "update"
+        targetPkg = ""
+      } else if (lower.startsWith("search package ") || lower.startsWith("find package ")) {
+        pkgAction = "search"
+        targetPkg = raw.replace(/^(?:search|find)\s+package\s+/i, "").trim()
+      } else {
+        pkgAction = "install"
+        targetPkg = raw.replace(/^(?:\/install|milo\s+install|milo-install|can\s+you\s+install|please\s+install|could\s+you\s+install|download\s+and\s+install|install|get|setup)\s+(?:for\s+me\s+)?/i, "").trim()
+        targetPkg = targetPkg.replace(/\s+(?:for\s+me|please|plz)$/i, "").trim()
+      }
+
+      root.hudVisible = true
+      root.isThinking = false
+      root.playSound("chirp")
+
+      if (pkgAction === "update") {
+        root.miloChatOutput = "📦 **[MILO PACKAGE MANAGER ACTIVE]**\n\n✦ Launching system upgrade console via pacman..."
+        quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // System Package Upgrade", "/home/jeffy/.local/bin/milo-pkg", "update"]
+      } else if (pkgAction === "remove") {
+        root.miloChatOutput = "🗑️ **[MILO PACKAGE MANAGER ACTIVE]**\n\n✦ Target: `" + targetPkg + "`\n✦ Spawning package removal console..."
+        quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Remove " + targetPkg, "/home/jeffy/.local/bin/milo-pkg", "remove", targetPkg]
+      } else if (pkgAction === "search") {
+        root.miloChatOutput = "🔍 **[MILO PACKAGE MANAGER ACTIVE]**\n\n✦ Searching repositories for: `" + targetPkg + "`..."
+        quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Search " + targetPkg, "/home/jeffy/.local/bin/milo-pkg", "search", targetPkg]
+      } else {
+        root.miloChatOutput = "📦 **[MILO PACKAGE MANAGER ACTIVE]**\n\n✦ Target: `" + targetPkg + "`\n✦ Resolving repository & spawning installation console..."
+        quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Install " + targetPkg, "/home/jeffy/.local/bin/milo-pkg", "install", targetPkg]
+      }
+      quickCmdProc.running = true
+      chatAutoDismissTimer.restart()
       return
     }
 

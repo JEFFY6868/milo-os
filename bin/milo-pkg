@@ -1,0 +1,387 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Milo OS — Native Package & Application Manager (milo-pkg)
+# Seamless Arch Linux & AUR Package Management for MiloOS
+# Part of MiloOS. Built for Arch Linux & Hyprland.
+# ==============================================================================
+
+set -eo pipefail
+
+# Cyberpunk Milo Palette
+CYAN='\033[38;2;0;245;255m'
+CYAN_MUTED='\033[38;2;56;189;248m'
+AMBER='\033[38;2;251;191;36m'
+EMERALD='\033[38;2;52;211;153m'
+ROSE='\033[38;2;244;63;94m'
+WHITE='\033[38;2;248;250;252m'
+MUTED='\033[38;2;148;163;184m'
+SUBTLE='\033[38;2;100;116;139m'
+BOLD='\033[1m'
+DIM='\033[2m'
+RESET='\033[0m'
+
+print_banner() {
+    clear 2>/dev/null || true
+    echo -e "${CYAN}${BOLD}"
+    echo "  ╔═══════════════════════════════════════════════════════════════╗"
+    echo "  ║        ⚡ MILO OS // NATIVE PACKAGE & APP MANAGER ⚡           ║"
+    echo "  ╚═══════════════════════════════════════════════════════════════╝"
+    echo -e "${RESET}"
+}
+
+notify_hud() {
+    local title="$1"
+    local msg="$2"
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send -a "Milo OS" "$title" "$msg" 2>/dev/null || true
+    fi
+    if [ -x "${HOME}/.local/bin/milo-sound" ]; then
+        "${HOME}/.local/bin/milo-sound" chime >/dev/null 2>&1 &
+    fi
+}
+
+# Resolve AUR helper if available
+get_aur_helper() {
+    if command -v yay >/dev/null 2>&1; then
+        echo "yay"
+    elif command -v paru >/dev/null 2>&1; then
+        echo "paru"
+    else
+        echo ""
+    fi
+}
+
+cmd_search() {
+    local query="$1"
+    if [ -z "$query" ]; then
+        echo -e "${ROSE}✖ Error:${RESET} Please provide a package name or search term."
+        echo -e "${MUTED}Usage: milo-pkg search <query>${RESET}"
+        exit 1
+    fi
+
+    print_banner
+    echo -e "${CYAN_MUTED}🔍 Searching official Arch repositories for '${WHITE}${query}${CYAN_MUTED}'...${RESET}\n"
+
+    # Search pacman
+    local pacman_matches
+    pacman_matches=$(pacman -Ss "$query" 2>/dev/null || true)
+
+    if [ -n "$pacman_matches" ]; then
+        echo -e "${AMBER}${BOLD}[ ARCH REPOSITORIES ]${RESET}"
+        echo "$pacman_matches" | awk '
+            NR%2==1 { 
+                split($1, a, "/"); 
+                repo=a[1]; pkg=a[2]; ver=$2; 
+                status="";
+                if ($0 ~ /\[installed/) status="\033[38;2;52;211;153m[INSTALLED]\033[0m";
+                printf "  \033[38;2;0;245;255m%-26s\033[0m \033[38;2;148;163;184m%-18s\033[0m \033[38;2;100;116;139m(%s)\033[0m %s\n", pkg, ver, repo, status
+            }
+            NR%2==0 { 
+                printf "    \033[38;2;203;213;225m%s\033[0m\n\n", $0 
+            }
+        '
+    else
+        echo -e "  ${SUBTLE}No official packages matched '${query}'.${RESET}\n"
+    fi
+
+    # Search AUR if helper exists
+    local aur_helper
+    aur_helper=$(get_aur_helper)
+    if [ -n "$aur_helper" ]; then
+        echo -e "${AMBER}${BOLD}[ ARCH USER REPOSITORY (AUR) ]${RESET}"
+        "$aur_helper" -Ss "$query" 2>/dev/null | head -n 30 || true
+    fi
+
+    echo -e "${SUBTLE}------------------------------------------------------------${RESET}"
+    echo -e "To install a package: ${CYAN}milo-pkg install <package-name>${RESET}"
+}
+
+cmd_info() {
+    local pkg="$1"
+    if [ -z "$pkg" ]; then
+        echo -e "${ROSE}✖ Error: Please specify a package.${RESET}"
+        exit 1
+    fi
+
+    if pacman -Qi "$pkg" >/dev/null 2>&1; then
+        echo -e "${EMERALD}${BOLD}[ INSTALLED PACKAGE INFO ]${RESET}"
+        pacman -Qi "$pkg"
+    elif pacman -Si "$pkg" >/dev/null 2>&1; then
+        echo -e "${CYAN}${BOLD}[ REPOSITORY PACKAGE INFO ]${RESET}"
+        pacman -Si "$pkg"
+    else
+        echo -e "${ROSE}✖ Package '${pkg}' not found in official repositories.${RESET}"
+    fi
+}
+
+cmd_install() {
+    local target="$1"
+    if [ -z "$target" ]; then
+        echo -e "${ROSE}✖ Error:${RESET} No package specified."
+        echo -e "${MUTED}Usage: milo-pkg install <package>${RESET}"
+        exit 1
+    fi
+
+    print_banner
+    echo -e "${CYAN_MUTED}✦ Analyzing target package: ${WHITE}${BOLD}${target}${RESET}"
+
+    # 1. Check if already installed
+    if pacman -Qi "$target" >/dev/null 2>&1; then
+        local cur_ver
+        cur_ver=$(pacman -Qi "$target" | grep -i "Version" | head -n 1 | awk '{print $3}')
+        echo -e "\n${EMERALD}✔ Package '${target}' is ALREADY INSTALLED on your system!${RESET}"
+        echo -e "  ${MUTED}Current Version:${RESET} ${WHITE}${cur_ver}${RESET}"
+        
+        # Check binary
+        local bin_path
+        bin_path=$(which "$target" 2>/dev/null || true)
+        if [ -n "$bin_path" ]; then
+            echo -e "  ${MUTED}Binary Location:${RESET} ${CYAN}${bin_path}${RESET}"
+        fi
+
+        echo ""
+        echo -e "${AMBER}Options:${RESET}"
+        echo -e "  [1] Reinstall / Upgrade '${target}'"
+        echo -e "  [2] Launch '${target}' immediately"
+        echo -e "  [3] Exit"
+        echo ""
+        read -rp "Select an option [1-3] (default: 2): " choice
+        choice="${choice:-2}"
+
+        if [ "$choice" == "2" ]; then
+            echo -e "\n${CYAN}🚀 Launching ${target}...${RESET}"
+            if [ -n "$bin_path" ]; then
+                nohup "$bin_path" >/dev/null 2>&1 & disown
+                sleep 0.5
+                exit 0
+            elif [ -f "/usr/share/applications/${target}.desktop" ] || [ -f "${HOME}/.local/share/applications/${target}.desktop" ]; then
+                gtk-launch "$target" 2>/dev/null || nohup "$target" >/dev/null 2>&1 & disown
+                exit 0
+            else
+                nohup "$target" >/dev/null 2>&1 & disown
+                exit 0
+            fi
+        elif [ "$choice" != "1" ]; then
+            echo -e "${SUBTLE}Operation cancelled.${RESET}"
+            exit 0
+        fi
+        echo -e "\n${CYAN_MUTED}Proceeding with reinstall of ${target}...${RESET}"
+    fi
+
+    # 2. Check if official repository package exists
+    local in_official=false
+    local in_aur=false
+    local aur_helper
+    aur_helper=$(get_aur_helper)
+
+    if pacman -Si "$target" >/dev/null 2>&1; then
+        in_official=true
+    elif [ -n "$aur_helper" ] && "$aur_helper" -Si "$target" >/dev/null 2>&1; then
+        in_aur=true
+    fi
+
+    # If exact name not found, search for closest matches
+    if [ "$in_official" = false ] && [ "$in_aur" = false ]; then
+        echo -e "\n${AMBER}⚠ Exact package '${target}' not found. Searching for closest matches...${RESET}\n"
+        local suggestions
+        suggestions=$(pacman -Ss "$target" 2>/dev/null | awk 'NR%2==1 {split($1, a, "/"); print a[2]}' | head -n 8 || true)
+
+        if [ -n "$suggestions" ]; then
+            echo -e "${CYAN_MUTED}Did you mean one of these?${RESET}"
+            select matched_pkg in $suggestions "Cancel"; do
+                if [ "$matched_pkg" == "Cancel" ] || [ -z "$matched_pkg" ]; then
+                    echo -e "${SUBTLE}Installation cancelled.${RESET}"
+                    exit 0
+                fi
+                target="$matched_pkg"
+                in_official=true
+                break
+            done
+        else
+            echo -e "${ROSE}✖ No packages found matching '${target}' in repositories.${RESET}"
+            echo -e "${MUTED}Try running: milo-pkg search <keyword>${RESET}"
+            echo ""
+            read -rp "Press [Enter] to exit..."
+            exit 1
+        fi
+    fi
+
+    # 3. Display package summary
+    echo -e "\n${AMBER}${BOLD}═══════════════════════════════════════════════════════════════${RESET}"
+    if [ "$in_official" = true ]; then
+        local repo_name ver_name desc_name size_name
+        repo_name=$(pacman -Si "$target" | grep -i "Repository" | head -n 1 | awk '{print $3}')
+        ver_name=$(pacman -Si "$target" | grep -i "Version" | head -n 1 | awk '{print $3}')
+        desc_name=$(pacman -Si "$target" | grep -i "Description" | head -n 1 | cut -d: -f2- | sed 's/^[ \t]*//')
+        size_name=$(pacman -Si "$target" | grep -i "Download Size" | head -n 1 | cut -d: -f2- | sed 's/^[ \t]*//')
+
+        echo -e "  ${MUTED}Target Package:${RESET}   ${CYAN}${BOLD}${target}${RESET}"
+        echo -e "  ${MUTED}Repository:${RESET}       ${WHITE}${repo_name}${RESET}"
+        echo -e "  ${MUTED}Version:${RESET}          ${WHITE}${ver_name}${RESET}"
+        [ -n "$size_name" ] && echo -e "  ${MUTED}Download Size:${RESET}    ${WHITE}${size_name}${RESET}"
+        [ -n "$desc_name" ] && echo -e "  ${MUTED}Description:${RESET}      ${WHITE}${desc_name}${RESET}"
+    else
+        echo -e "  ${MUTED}Target Package:${RESET}   ${CYAN}${BOLD}${target}${RESET}"
+        echo -e "  ${MUTED}Source:${RESET}           ${AMBER}Arch User Repository (AUR via ${aur_helper})${RESET}"
+    fi
+    echo -e "${AMBER}${BOLD}═══════════════════════════════════════════════════════════════${RESET}\n"
+
+    read -rp "Proceed with installation? [Y/n]: " confirm
+    confirm="${confirm:-Y}"
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        echo -e "${SUBTLE}Installation cancelled by user.${RESET}"
+        exit 0
+    fi
+
+    # 4. Check for pacman db lock
+    if [ -f "/var/lib/pacman/db.lck" ]; then
+        echo -e "\n${AMBER}⚠ Warning: /var/lib/pacman/db.lck exists.${RESET}"
+        if pgrep -x pacman >/dev/null 2>&1; then
+            echo -e "${ROSE}Another pacman process is currently running. Waiting for it to finish...${RESET}"
+            while pgrep -x pacman >/dev/null 2>&1; do sleep 1; done
+        else
+            echo -e "${CYAN}Stale lock file detected. Removing /var/lib/pacman/db.lck...${RESET}"
+            sudo rm -f /var/lib/pacman/db.lck
+        fi
+    fi
+
+    # 5. Execute Installation
+    echo -e "\n${CYAN_MUTED}⚡ Executing package installation...${RESET}\n"
+
+    if [ "$in_official" = true ]; then
+        sudo pacman -S --needed "$target"
+    else
+        "$aur_helper" -S --needed "$target"
+    fi
+
+    # 6. Post-install verification
+    echo ""
+    if pacman -Qi "$target" >/dev/null 2>&1; then
+        echo -e "${EMERALD}${BOLD}✔ SUCCESS: '${target}' has been installed successfully!${RESET}"
+
+        # Update desktop database if desktop entries were added
+        update-desktop-database "${HOME}/.local/share/applications" 2>/dev/null || true
+
+        # Execute application-specific hooks if present
+        if [ -x "/usr/bin/omarchy-restart-${target}" ]; then
+            /usr/bin/omarchy-restart-${target} 2>/dev/null || true
+        fi
+
+        notify_hud "Package Installed" "✔ ${target} is now installed and ready to use."
+
+        # Detect executable binary
+        local installed_bin
+        installed_bin=$(which "$target" 2>/dev/null || true)
+        if [ -z "$installed_bin" ]; then
+            installed_bin=$(pacman -Ql "$target" 2>/dev/null | grep -E '/usr/bin/[^/]+$' | head -n 1 | awk '{print $2}')
+        fi
+
+        echo -e "\n${SUBTLE}------------------------------------------------------------${RESET}"
+        if [ -n "$installed_bin" ]; then
+            echo -e "Executable: ${CYAN}${installed_bin}${RESET}"
+            echo -e "Press ${BOLD}[ENTER]${RESET} to launch ${WHITE}${target}${RESET} right now, or ${BOLD}[Q]${RESET} to exit."
+            read -rp "" post_action
+            if [ "$post_action" == "" ]; then
+                echo -e "${CYAN}🚀 Launching ${target}...${RESET}"
+                # If command is interactive terminal tool or GUI
+                if [ -t 1 ] && [[ "$target" == *"tui"* || "$target" == *"top"* || "$target" == "opencode" ]]; then
+                    exec "$installed_bin"
+                else
+                    nohup "$installed_bin" >/dev/null 2>&1 & disown
+                    sleep 0.5
+                fi
+            fi
+        else
+            echo -e "Press ${BOLD}[ENTER]${RESET} to exit."
+            read -rp ""
+        fi
+    else
+        echo -e "${ROSE}${BOLD}✖ Installation did not complete successfully.${RESET}"
+        echo -e "${MUTED}Please check pacman logs for details.${RESET}"
+        read -rp "Press [Enter] to exit..."
+        exit 1
+    fi
+}
+
+cmd_remove() {
+    local target="$1"
+    if [ -z "$target" ]; then
+        echo -e "${ROSE}✖ Error: Please specify a package to remove.${RESET}"
+        exit 1
+    fi
+
+    print_banner
+    echo -e "${ROSE}🗑️ Target for removal: ${WHITE}${BOLD}${target}${RESET}\n"
+
+    if ! pacman -Qi "$target" >/dev/null 2>&1; then
+        echo -e "${AMBER}⚠ Package '${target}' is not installed on this system.${RESET}"
+        exit 0
+    fi
+
+    read -rp "Are you sure you want to remove '${target}' and its unneeded dependencies? [y/N]: " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        echo -e "${SUBTLE}Removal cancelled.${RESET}"
+        exit 0
+    fi
+
+    sudo pacman -Rns "$target"
+    notify_hud "Package Removed" "🗑️ ${target} has been uninstalled."
+    echo -e "\n${EMERALD}✔ Package '${target}' removed.${RESET}"
+    read -rp "Press [Enter] to exit..."
+}
+
+cmd_update() {
+    print_banner
+    echo -e "${CYAN}${BOLD}⚡ Milo OS System & Package Synchronizer ⚡${RESET}\n"
+
+    local aur_helper
+    aur_helper=$(get_aur_helper)
+
+    if [ -n "$aur_helper" ]; then
+        echo -e "${CYAN_MUTED}Running full system & AUR update via ${aur_helper}...${RESET}\n"
+        "$aur_helper" -Syu
+    else
+        echo -e "${CYAN_MUTED}Running full official repo update via pacman...${RESET}\n"
+        sudo pacman -Syu
+    fi
+
+    notify_hud "System Updated" "⚡ All system packages are up to date."
+    echo -e "\n${EMERALD}✔ System update completed.${RESET}"
+    read -rp "Press [Enter] to exit..."
+}
+
+# Main command dispatcher
+ACTION="${1:-help}"
+shift 2>/dev/null || true
+
+case "$ACTION" in
+    install|i|add)
+        cmd_install "$@"
+        ;;
+    remove|rm|uninstall|delete)
+        cmd_remove "$@"
+        ;;
+    search|s|find)
+        cmd_search "$@"
+        ;;
+    info|show)
+        cmd_info "$@"
+        ;;
+    update|upgrade|up|sync)
+        cmd_update "$@"
+        ;;
+    help|--help|-h)
+        print_banner
+        echo -e "${WHITE}${BOLD}Commands:${RESET}"
+        echo -e "  ${CYAN}milo-pkg install <pkg>${RESET}    Search and install official Arch or AUR package"
+        echo -e "  ${CYAN}milo-pkg remove <pkg>${RESET}     Safely uninstall package and orphan dependencies"
+        echo -e "  ${CYAN}milo-pkg search <query>${RESET}   Search official repositories and AUR"
+        echo -e "  ${CYAN}milo-pkg info <pkg>${RESET}       Display package metadata, size and description"
+        echo -e "  ${CYAN}milo-pkg update${RESET}           Full system package update (pacman/AUR)"
+        echo ""
+        ;;
+    *)
+        # Default behavior: treat unknown first arg as package to install
+        cmd_install "$ACTION" "$@"
+        ;;
+esac

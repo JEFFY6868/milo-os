@@ -17,6 +17,18 @@ case "$CMD" in
     shift
     exec ${HOME}/.local/bin/milo-evolve audit "$@"
     ;;
+  install)
+    shift
+    exec ${HOME}/.local/bin/milo-pkg install "$@"
+    ;;
+  uninstall|remove)
+    shift
+    exec ${HOME}/.local/bin/milo-pkg remove "$@"
+    ;;
+  pkg|package|packages)
+    shift
+    exec ${HOME}/.local/bin/milo-pkg "$@"
+    ;;
   sound)
     shift
     exec ${HOME}/.local/bin/milo-sound "$@"
