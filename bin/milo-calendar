@@ -20,7 +20,15 @@ from pathlib import Path
 BASE_DIR = Path.home() / ".local" / "share" / "milo" / "calendar"
 DB_PATH = BASE_DIR / "calendar.db"
 AGENDA_CACHE = BASE_DIR / "agenda_today.json"
+WORKTIME_PATH = BASE_DIR / "worktime.json"
 TRIGGER_PATH = Path("/tmp/milo-scratchpad-trigger")
+
+DEFAULT_WORKTIME = {
+    "start": "09:00",
+    "end": "18:00",
+    "days": ["Mon", "Tue", "Wed", "Thu", "Fri"],
+    "enabled": True,
+}
 
 # Colors for Terminal / Tactical Trinity
 CYAN = "\033[1;36m"
@@ -59,6 +67,88 @@ def get_db():
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_date ON events(event_date)")
     return conn
+
+def load_worktime() -> dict:
+    BASE_DIR.mkdir(parents=True, exist_ok=True)
+    if not WORKTIME_PATH.exists():
+        WORKTIME_PATH.write_text(json.dumps(DEFAULT_WORKTIME, indent=2) + "\n", encoding="utf-8")
+        return DEFAULT_WORKTIME.copy()
+    try:
+        data = json.loads(WORKTIME_PATH.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            for k, v in DEFAULT_WORKTIME.items():
+                if k not in data:
+                    data[k] = v
+            return data
+    except Exception:
+        pass
+    return DEFAULT_WORKTIME.copy()
+
+def get_worktime_status(wt: dict = None) -> dict:
+    if wt is None:
+        wt = load_worktime()
+    
+    now = datetime.now()
+    today_name = now.strftime("%a")
+    start_str = wt.get("start", "09:00")
+    end_str = wt.get("end", "18:00")
+    days = wt.get("days", ["Mon", "Tue", "Wed", "Thu", "Fri"])
+    enabled = wt.get("enabled", True)
+
+    is_workday = today_name in days
+    
+    try:
+        start_time = datetime.strptime(start_str, "%H:%M").time()
+        end_time = datetime.strptime(end_str, "%H:%M").time()
+        now_time = now.time()
+        is_during_hours = start_time <= now_time <= end_time
+    except Exception:
+        is_during_hours = False
+
+    is_worktime = enabled and is_workday and is_during_hours
+    
+    if not enabled:
+        status_label = "DISABLED"
+        status_text = "Worktime Tracking Disabled"
+    elif not is_workday:
+        status_label = "OFF DUTY"
+        status_text = "Off Duty (Weekend / Non-Workday)"
+    elif is_worktime:
+        end_dt = datetime.combine(now.date(), end_time)
+        rem_min = int((end_dt - now).total_seconds() / 60)
+        h = rem_min // 60
+        m = rem_min % 60
+        time_left = f"{h}h {m}m" if h > 0 else f"{m}m"
+        status_label = "ON DUTY"
+        status_text = f"On Duty ({time_left} left)"
+    else:
+        if now_time < start_time:
+            start_dt = datetime.combine(now.date(), start_time)
+            rem_min = int((start_dt - now).total_seconds() / 60)
+            h = rem_min // 60
+            m = rem_min % 60
+            time_left = f"{h}h {m}m" if h > 0 else f"{m}m"
+            status_label = "OFF DUTY"
+            status_text = f"Off Duty (Starts in {time_left} @ {start_str})"
+        else:
+            status_label = "OFF DUTY"
+            status_text = "Off Duty (Completed for today)"
+
+    return {
+        "start": start_str,
+        "end": end_str,
+        "days": days,
+        "enabled": enabled,
+        "is_worktime": is_worktime,
+        "status": status_label,
+        "status_text": status_text,
+        "updated_at": int(time.time())
+    }
+
+def save_worktime(data: dict) -> None:
+    BASE_DIR.mkdir(parents=True, exist_ok=True)
+    WORKTIME_PATH.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    sync_cache()
 
 def sync_cache():
     """Writes today's agenda JSON for the Wallpaper HUD and signals QML."""
@@ -104,6 +194,13 @@ def sync_cache():
     BASE_DIR.mkdir(parents=True, exist_ok=True)
     AGENDA_CACHE.write_text(json.dumps(events, indent=2) + "\n", encoding="utf-8")
     
+    # Also refresh live worktime status
+    try:
+        wt_status = get_worktime_status()
+        WORKTIME_PATH.write_text(json.dumps(wt_status, indent=2) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
     # Ping HUD trigger
     try:
         TRIGGER_PATH.write_text(f"{int(time.time()*1000)} update_agenda\n")
@@ -182,8 +279,73 @@ def cmd_add(args):
     print(f"  {CYAN}Time:{RESET}     {time_fmt} ({args.duration}m)")
     print(f"  {CYAN}Category:{RESET} {cat.upper()}")
 
+def cmd_worktime(args):
+    wt = load_worktime()
+    
+    modified = False
+    target_range = getattr(args, "set", None) or getattr(args, "range", None)
+    
+    if target_range:
+        raw = target_range.strip()
+        parts = re.split(r'[-–—]|(?:\s+to\s+)', raw, maxsplit=1)
+        if len(parts) == 2:
+            s = parse_time(parts[0].strip())
+            e = parse_time(parts[1].strip())
+            wt["start"] = s
+            wt["end"] = e
+            wt["enabled"] = True
+            modified = True
+        else:
+            print(f"{CRIMSON}[ERROR]{RESET} Invalid range format '{target_range}'. Use '09:00-18:00' or '9am to 6pm'.")
+            sys.exit(1)
+            
+    if getattr(args, "start", None):
+        wt["start"] = parse_time(args.start)
+        wt["enabled"] = True
+        modified = True
+    if getattr(args, "end", None):
+        wt["end"] = parse_time(args.end)
+        wt["enabled"] = True
+        modified = True
+    if getattr(args, "enable", False):
+        wt["enabled"] = True
+        modified = True
+    if getattr(args, "disable", False):
+        wt["enabled"] = False
+        modified = True
+    if getattr(args, "days", None):
+        raw_days = [d.strip().capitalize()[:3] for d in args.days.split(",") if d.strip()]
+        if raw_days:
+            wt["days"] = raw_days
+            modified = True
+
+    status_data = get_worktime_status(wt)
+    if modified:
+        save_worktime(status_data)
+        print(f"{GREEN}✓ Milo Worktime Updated:{RESET} {wt['start']} – {wt['end']} ({', '.join(wt['days'])})")
+    
+    if getattr(args, "json", False):
+        print(json.dumps(status_data, indent=2))
+        return
+        
+    s_tag = f"{GREEN}● {status_data['status']}{RESET}" if status_data['is_worktime'] else f"{YELLOW}⏳ {status_data['status']}{RESET}"
+    print(f"\n{CYAN}✦ MILO WORKTIME PROFILE{RESET}")
+    print(f"{DIM}─────────────────────────────────────────────{RESET}")
+    print(f"  {CYAN}Hours:{RESET}     {status_data['start']} – {status_data['end']}")
+    print(f"  {CYAN}Days:{RESET}      {', '.join(status_data['days'])}")
+    print(f"  {CYAN}Active:{RESET}    {'Yes' if status_data['enabled'] else 'No'}")
+    print(f"  {CYAN}Status:{RESET}    {s_tag} · {status_data['status_text']}\n")
+
 def cmd_quick(args):
     text = args.text.strip()
+    
+    # Intercept worktime configuration in quick bar
+    m_wt = re.match(r'^(?:set\s+)?work\s*time(?:\s+(?:to\s+)?(.*))?$', text, re.I)
+    if m_wt:
+        param = (m_wt.group(1) or "").strip()
+        wt_args = argparse.Namespace(set=param if param else None, start=None, end=None, days=None, enable=False, disable=False, json=False, range=None)
+        cmd_worktime(wt_args)
+        return
     
     # 1. Parse date from natural text if not passed explicitly
     norm_date = None
@@ -398,9 +560,12 @@ def cmd_briefing(args):
             ORDER BY event_time ASC
         """, (today.isoformat(),)).fetchall()
         
+    wt_status = get_worktime_status()
+    wt_desc = f" Your work hours are {wt_status['start']} to {wt_status['end']} ({wt_status['status_text']})." if wt_status.get("enabled") else ""
+
     today_fmt = today.strftime("%A, %B %d")
     if not rows:
-        print(f"Good morning, sir. Today is {today_fmt}. You have no events scheduled on your local calendar. Your schedule is completely open.")
+        print(f"Good morning, sir. Today is {today_fmt}. You have no events scheduled on your local calendar. Your schedule is completely open.{wt_desc}")
         return
         
     count = len(rows)
@@ -412,7 +577,7 @@ def cmd_briefing(args):
         events_spoken.append(f"{r['title']} at {t_str}")
         
     events_str = ", and ".join(events_spoken) if count <= 2 else ", ".join(events_spoken[:-1]) + f", and {events_spoken[-1]}"
-    print(f"Good morning, sir. Today is {today_fmt}. You have {count} {ev_word} scheduled: {events_str}.")
+    print(f"Good morning, sir. Today is {today_fmt}. You have {count} {ev_word} scheduled: {events_str}.{wt_desc}")
 
 def cmd_daemon(args):
     """Background monitoring daemon for 5-minute event heads-up warnings."""
@@ -505,6 +670,17 @@ def main():
     
     # briefing
     subparsers.add_parser("briefing", help="Emit spoken natural language briefing for milo-speak")
+
+    # worktime
+    p_wt = subparsers.add_parser("worktime", help="View or set daily working hours")
+    p_wt.add_argument("range", nargs="?", help="Optional shorthand range (e.g. '09:00-18:00' or '9am-6pm')")
+    p_wt.add_argument("--set", help="Set working hours range (e.g. '09:00-18:00', '9am to 6pm')")
+    p_wt.add_argument("--start", help="Work start time (e.g. '09:00')")
+    p_wt.add_argument("--end", help="Work end time (e.g. '18:00')")
+    p_wt.add_argument("--days", help="Active work days (e.g. 'Mon,Tue,Wed,Thu,Fri')")
+    p_wt.add_argument("--enable", action="store_true", help="Enable worktime tracking")
+    p_wt.add_argument("--disable", action="store_true", help="Disable worktime tracking")
+    p_wt.add_argument("--json", action="store_true", help="Output raw JSON")
     
     # daemon
     p_daemon = subparsers.add_parser("daemon", help="Run background reminder watcher")
@@ -523,6 +699,7 @@ def main():
         "quick": cmd_quick,
         "rm": cmd_rm,
         "briefing": cmd_briefing,
+        "worktime": cmd_worktime,
         "daemon": cmd_daemon,
     }
     cmds[args.command](args)

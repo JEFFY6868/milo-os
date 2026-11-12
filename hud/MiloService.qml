@@ -10,7 +10,6 @@ Item {
   id: root
 
   readonly property string homeDir: Quickshell.env("HOME") || ("/home/" + (Quickshell.env("USER") || "user"))
-
   property bool hudVisible: true
   property string memText: "5.1 / 15.5 GB (33%)"
   property real memPercent: 0.33
@@ -56,6 +55,15 @@ Item {
   property string scratchpadFilter: "all"  // "all" | "pending" | "completed"
   property string midLeftTab: "tasks"      // "tasks" | "agenda"
   property var agendaList: []
+  property var worktimeData: ({
+    start: "09:00",
+    end: "18:00",
+    days: ["Mon", "Tue", "Wed", "Thu", "Fri"],
+    enabled: true,
+    is_worktime: false,
+    status: "OFF DUTY",
+    status_text: "Off Duty"
+  })
 
   function reloadAgenda() {
     try {
@@ -64,6 +72,11 @@ Item {
         var d = JSON.parse(raw)
         if (Array.isArray(d)) root.agendaList = d
       }
+      var wtRaw = worktimeFile.text().trim()
+      if (wtRaw) {
+        var wt = JSON.parse(wtRaw)
+        if (wt && typeof wt === 'object') root.worktimeData = wt
+      }
     } catch(e) {}
   }
 
@@ -71,6 +84,13 @@ Item {
     if (!text || !text.trim()) return
     if (quickCmdProc.running) quickCmdProc.running = false
     quickCmdProc.command = [root.homeDir + "/.local/bin/milo-calendar", "quick", text.trim()]
+    quickCmdProc.running = true
+  }
+
+  function setWorktime(rangeStr) {
+    if (!rangeStr || !rangeStr.trim()) return
+    if (quickCmdProc.running) quickCmdProc.running = false
+    quickCmdProc.command = [root.homeDir + "/.local/bin/milo-calendar", "worktime", "--set", rangeStr.trim()]
     quickCmdProc.running = true
   }
 
@@ -91,7 +111,7 @@ Item {
     thinkingWatchdog.restart()
     root.hasPendingEvolution = false
     if (evoProc.running) evoProc.running = false
-    evoProc.command = [root.homeDir + "/.local/bin/milo-evolve", "approve"]
+    evoProc.command = ["/home/jeffy/.local/bin/milo-evolve", "approve"]
     evoProc.running = true
   }
 
@@ -99,7 +119,7 @@ Item {
     root.miloChatOutput = "✦ Evolution proposal deferred."
     root.hasPendingEvolution = false
     if (quickCmdProc.running) quickCmdProc.running = false
-    quickCmdProc.command = [root.homeDir + "/.local/bin/milo-evolve", "defer"]
+    quickCmdProc.command = ["/home/jeffy/.local/bin/milo-evolve", "defer"]
     quickCmdProc.running = true
     chatAutoDismissTimer.restart()
   }
@@ -145,7 +165,7 @@ Item {
 
   FileView {
     id: todosFile
-    path: root.homeDir + "/.config/omarchy/todos.json"
+    path: "/home/jeffy/.config/omarchy/todos.json"
     watchChanges: true
     atomicWrites: true
     printErrors: false
@@ -176,6 +196,22 @@ Item {
     }
   }
 
+  FileView {
+    id: worktimeFile
+    path: root.homeDir + "/.local/share/milo/calendar/worktime.json"
+    watchChanges: true
+    printErrors: false
+    onLoaded: {
+      try {
+        var raw = text().trim()
+        if (raw) {
+          var wt = JSON.parse(raw)
+          if (wt && typeof wt === 'object') root.worktimeData = wt
+        }
+      } catch(e) {}
+    }
+  }
+
   // Milo Scratchpad Modal External IPC Trigger
   FileView {
     id: scratchpadTriggerWatcher
@@ -194,6 +230,19 @@ Item {
             root.scratchpadModalOpen = true
           } else if (act === "close") {
             root.scratchpadModalOpen = false
+          } else if (act === "open_agenda") {
+            root.midLeftTab = "agenda"
+            root.scratchpadModalOpen = true
+          } else if (act === "toggle_agenda") {
+            if (root.scratchpadModalOpen && root.midLeftTab === "agenda") {
+              root.scratchpadModalOpen = false
+            } else {
+              root.midLeftTab = "agenda"
+              root.scratchpadModalOpen = true
+            }
+          } else if (act === "open_tasks") {
+            root.midLeftTab = "tasks"
+            root.scratchpadModalOpen = true
           } else if (act === "update" || act === "update_agenda") {
             // Trigger todos reload from disk
             var rawJson = todosFile.text().trim()
@@ -205,6 +254,11 @@ Item {
             if (rawAgenda) {
               var a = JSON.parse(rawAgenda)
               if (Array.isArray(a)) root.agendaList = a
+            }
+            var rawWt = worktimeFile.text().trim()
+            if (rawWt) {
+              var wtObj = JSON.parse(rawWt)
+              if (wtObj && typeof wtObj === 'object') root.worktimeData = wtObj
             }
           }
         }
@@ -367,7 +421,7 @@ Item {
 
   Process {
     id: intelStatusProc
-    command: [root.homeDir + "/.local/share/milo/venv/bin/python3", root.homeDir + "/.local/share/milo/cortex/intelligence_router.py", "status"]
+    command: ["/home/jeffy/.local/share/milo/venv/bin/python3", "/home/jeffy/.local/share/milo/cortex/intelligence_router.py", "status"]
     stdout: StdioCollector {
       onStreamFinished: {
         try {
@@ -382,7 +436,7 @@ Item {
   }
 
   function setIntelligenceMode(modeId) {
-    quickCmdProc.command = [root.homeDir + "/.local/share/milo/venv/bin/python3", root.homeDir + "/.local/share/milo/cortex/intelligence_router.py", "set", modeId]
+    quickCmdProc.command = ["/home/jeffy/.local/share/milo/venv/bin/python3", "/home/jeffy/.local/share/milo/cortex/intelligence_router.py", "set", modeId]
     quickCmdProc.running = true
     root.intelligenceMode = modeId
     if (modeId === "online") {
@@ -399,7 +453,7 @@ Item {
   }
 
   function toggleIntelligenceMode() {
-    quickCmdProc.command = [root.homeDir + "/.local/share/milo/venv/bin/python3", root.homeDir + "/.local/share/milo/cortex/intelligence_router.py", "toggle"]
+    quickCmdProc.command = ["/home/jeffy/.local/share/milo/venv/bin/python3", "/home/jeffy/.local/share/milo/cortex/intelligence_router.py", "toggle"]
     quickCmdProc.running = true
     if (root.intelligenceMode === "auto") root.setIntelligenceMode("online")
     else if (root.intelligenceMode === "online") root.setIntelligenceMode("offline")
@@ -408,7 +462,7 @@ Item {
 
   Process {
     id: uplinkProc
-    command: [root.homeDir + "/.local/bin/milo-uplink"]
+    command: ["/home/jeffy/.local/bin/milo-uplink"]
     stdout: StdioCollector {
       onStreamFinished: {
         var parts = text.trim().split(":::")
@@ -429,7 +483,7 @@ Item {
   // Unified Native Hardware Telemetry Process (replaces 3 bash subshells and top -bn1)
   Process {
     id: hardwareTelemProc
-    command: [root.homeDir + "/.local/bin/milo-telemetry"]
+    command: ["/home/jeffy/.local/bin/milo-telemetry"]
     stdout: StdioCollector {
       onStreamFinished: {
         var parts = text.trim().split(":::")
@@ -454,7 +508,7 @@ Item {
 
   Process {
     id: mediaProc
-    command: [root.homeDir + "/.local/bin/milo-music", "status"]
+    command: ["/home/jeffy/.local/bin/milo-music", "status"]
     stdout: StdioCollector {
       onStreamFinished: {
         var out = text.trim()
@@ -483,7 +537,7 @@ Item {
         var out = text ? text.trim() : ""
         if (out.length > 0) {
           if (agyProc.command && agyProc.command.length > 0 && String(agyProc.command[0]).indexOf("milo-look") !== -1) {
-            root.lastCameraSnapshot = root.homeDir + "/.local/state/milo/eyes/current_camera_capture.jpg?t=" + Date.now()
+            root.lastCameraSnapshot = "/home/jeffy/.local/state/milo/eyes/current_camera_capture.jpg?t=" + Date.now()
           } else {
             root.lastCameraSnapshot = ""
           }
@@ -588,7 +642,7 @@ Item {
       chatAutoDismissTimer.stop()
       thinkingWatchdog.restart()
       if (evoProc.running) evoProc.running = false
-      evoProc.command = [root.homeDir + "/.local/bin/milo-doctor"]
+      evoProc.command = ["/home/jeffy/.local/bin/milo-doctor"]
       evoProc.running = true
       return
     }
@@ -605,7 +659,7 @@ Item {
       chatAutoDismissTimer.stop()
       thinkingWatchdog.restart()
       if (evoProc.running) evoProc.running = false
-      evoProc.command = [root.homeDir + "/.local/bin/milo-evolve", "audit"]
+      evoProc.command = ["/home/jeffy/.local/bin/milo-evolve", "audit"]
       evoProc.running = true
       return
     }
@@ -622,7 +676,7 @@ Item {
       chatAutoDismissTimer.stop()
       thinkingWatchdog.restart()
       if (evoProc.running) evoProc.running = false
-      evoProc.command = [root.homeDir + "/.local/bin/milo-evolve", "wish", (wishText || raw)]
+      evoProc.command = ["/home/jeffy/.local/bin/milo-evolve", "wish", (wishText || raw)]
       evoProc.running = true
       return
     }
@@ -639,7 +693,7 @@ Item {
     // 1. Autonomous Vision-Action Operator (strictly requires explicit /do or operate)
     if (raw.startsWith("/do ") || lower.startsWith("operate ") || lower.startsWith("/operate ")) {
       var doGoal = raw.replace(/^(?:\/do|operate|\/operate)\s+/, "")
-      quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Autonomous Operator", root.homeDir + "/.local/bin/milo-do", doGoal]
+      quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Autonomous Operator", "/home/jeffy/.local/bin/milo-do", doGoal]
       quickCmdProc.running = true
       return
     }
@@ -669,7 +723,7 @@ Item {
       chatAutoDismissTimer.stop()
       thinkingWatchdog.restart()
 
-      var lookArgs = [root.homeDir + "/.local/bin/milo-look", "--raw"]
+      var lookArgs = ["/home/jeffy/.local/bin/milo-look", "--raw"]
       if (lower.indexOf("posture") !== -1) {
         lookArgs.push("--posture")
       } else if (lower.indexOf("desk") !== -1) {
@@ -687,7 +741,7 @@ Item {
     // 2. Milo CEO Dispatcher
     if (raw.startsWith("/dispatch ") || raw.startsWith("/code ") || raw.startsWith("/fix ")) {
       var mission = raw.replace(/^\/(dispatch|code|fix)\s+/, "")
-      quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // CEO Dispatcher", root.homeDir + "/.local/bin/milo-dispatch", mission]
+      quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // CEO Dispatcher", "/home/jeffy/.local/bin/milo-dispatch", mission]
       quickCmdProc.running = true
       return
     }
@@ -695,7 +749,7 @@ Item {
     // 3. Aider QA Debugger
     if (raw === "/test" || raw.startsWith("/test ")) {
       var target = raw.replace(/^\/test\s*/, "")
-      quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Aider QA Debugger", root.homeDir + "/.local/bin/milo-test", target]
+      quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Aider QA Debugger", "/home/jeffy/.local/bin/milo-test", target]
       quickCmdProc.running = true
       return
     }
@@ -703,7 +757,7 @@ Item {
     // 4. Hermes Operations
     if (raw === "/ops" || raw.startsWith("/ops ")) {
       var opsGoal = raw.replace(/^\/ops\s*/, "")
-      quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Hermes Operations", root.homeDir + "/.local/bin/milo-hermes", "chat", opsGoal]
+      quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Hermes Operations", "/home/jeffy/.local/bin/milo-hermes", "chat", opsGoal]
       quickCmdProc.running = true
       return
     }
@@ -712,9 +766,9 @@ Item {
     if (lower === "/game" || lower === "/gamemode" || lower.startsWith("/game ") || lower.startsWith("/gamemode ")) {
       var gameArgs = raw.replace(/^\/(?:game|gamemode)\s*/, "").trim()
       if (!gameArgs || gameArgs === "toggle") {
-        quickCmdProc.command = [root.homeDir + "/.local/bin/milo-game", "toggle"]
+        quickCmdProc.command = ["/home/jeffy/.local/bin/milo-game", "toggle"]
       } else {
-        quickCmdProc.command = [root.homeDir + "/.local/bin/milo-game", gameArgs]
+        quickCmdProc.command = ["/home/jeffy/.local/bin/milo-game", gameArgs]
       }
       quickCmdProc.running = true
       return
@@ -724,26 +778,26 @@ Item {
     if (lower === "/evolve" || lower.startsWith("/evolve ") || lower === "/upgrade" || lower.startsWith("/upgrade ")) {
       var evoSub = raw.replace(/^\/(?:evolve|upgrade)\s*/i, "").trim().toLowerCase()
       if (!evoSub || evoSub === "plan") {
-        quickCmdProc.command = [root.homeDir + "/.local/bin/milo-evolve", "plan"]
+        quickCmdProc.command = ["/home/jeffy/.local/bin/milo-evolve", "plan"]
       } else if (evoSub === "approve" || evoSub === "apply" || evoSub === "yes") {
-        quickCmdProc.command = [root.homeDir + "/.local/bin/milo-evolve", "approve"]
+        quickCmdProc.command = ["/home/jeffy/.local/bin/milo-evolve", "approve"]
       } else if (evoSub === "defer" || evoSub === "dismiss" || evoSub === "no") {
-        quickCmdProc.command = [root.homeDir + "/.local/bin/milo-evolve", "defer"]
+        quickCmdProc.command = ["/home/jeffy/.local/bin/milo-evolve", "defer"]
       } else if (evoSub === "diff" || evoSub === "inspect") {
-        quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Upgrade Code Inspector", root.homeDir + "/.local/bin/milo-evolve", "diff"]
+        quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Upgrade Code Inspector", "/home/jeffy/.local/bin/milo-evolve", "diff"]
       } else if (evoSub === "doctor" || evoSub === "heal") {
-        quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // System Doctor", root.homeDir + "/.local/bin/milo-evolve", "doctor"]
+        quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // System Doctor", "/home/jeffy/.local/bin/milo-evolve", "doctor"]
       } else if (evoSub === "bench" || evoSub === "benchmark") {
-        quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Latency Benchmark", root.homeDir + "/.local/bin/milo-evolve", "benchmark"]
+        quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Latency Benchmark", "/home/jeffy/.local/bin/milo-evolve", "benchmark"]
       } else if (evoSub.startsWith("wish ")) {
         var wishPrompt = raw.replace(/^\/(?:evolve|upgrade)\s+wish\s+/i, "").trim()
-        quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Thought-to-Code Genesis", root.homeDir + "/.local/bin/milo-evolve", "wish", wishPrompt]
+        quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Thought-to-Code Genesis", "/home/jeffy/.local/bin/milo-evolve", "wish", wishPrompt]
       } else if (evoSub === "rollback") {
-        quickCmdProc.command = [root.homeDir + "/.local/bin/milo-evolve", "test-rollback"]
+        quickCmdProc.command = ["/home/jeffy/.local/bin/milo-evolve", "test-rollback"]
       } else if (evoSub === "status" || evoSub === "ledger") {
-        quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Evolution Ledger", root.homeDir + "/.local/bin/milo-evolve", "status"]
+        quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Evolution Ledger", "/home/jeffy/.local/bin/milo-evolve", "status"]
       } else {
-        quickCmdProc.command = [root.homeDir + "/.local/bin/milo-evolve", evoSub]
+        quickCmdProc.command = ["/home/jeffy/.local/bin/milo-evolve", evoSub]
       }
       quickCmdProc.running = true
       return
@@ -758,7 +812,7 @@ Item {
       chatAutoDismissTimer.stop()
       thinkingWatchdog.restart()
       if (evoProc.running) evoProc.running = false
-      evoProc.command = [root.homeDir + "/.local/bin/milo-evolve", "wish", directWish]
+      evoProc.command = ["/home/jeffy/.local/bin/milo-evolve", "wish", directWish]
       evoProc.running = true
       return
     }
@@ -843,7 +897,7 @@ Item {
 
     function evolve(subcmd: string): string {
       var sub = (subcmd || "plan").trim()
-      quickCmdProc.command = [root.homeDir + "/.local/bin/milo-evolve", sub]
+      quickCmdProc.command = ["/home/jeffy/.local/bin/milo-evolve", sub]
       quickCmdProc.running = true
       return "Milo evolution command dispatched: " + sub
     }
@@ -859,7 +913,7 @@ Item {
     }
 
     function showCamera(text: string, imagePath: string): string {
-      root.lastCameraSnapshot = imagePath || root.homeDir + "/.local/state/milo/eyes/current_camera_capture.jpg"
+      root.lastCameraSnapshot = imagePath || "/home/jeffy/.local/state/milo/eyes/current_camera_capture.jpg"
       root.miloChatOutput = text
       chatAutoDismissTimer.restart()
       return "ok"
@@ -1330,7 +1384,7 @@ Item {
             cursorShape: Qt.PointingHandCursor
             hoverEnabled: true
             onClicked: {
-              quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Claude Architect", root.homeDir + "/.local/bin/milo-code"]
+              quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Claude Architect", "/home/jeffy/.local/bin/milo-code"]
               quickCmdProc.running = true
             }
           }
@@ -1400,7 +1454,7 @@ Item {
             cursorShape: Qt.PointingHandCursor
             hoverEnabled: true
             onClicked: {
-              quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Hermes Operations", root.homeDir + "/.local/bin/milo-hermes"]
+              quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Hermes Operations", "/home/jeffy/.local/bin/milo-hermes"]
               quickCmdProc.running = true
             }
           }
@@ -1463,7 +1517,7 @@ Item {
             cursorShape: Qt.PointingHandCursor
             hoverEnabled: true
             onClicked: {
-              quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Aider QA Debugger", root.homeDir + "/.local/bin/milo-test"]
+              quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Aider QA Debugger", "/home/jeffy/.local/bin/milo-test"]
               quickCmdProc.running = true
             }
           }
@@ -1823,6 +1877,56 @@ Item {
             }
           }
 
+          // Worktime Status Pill (Desktop HUD - Agenda Tab)
+          Rectangle {
+            Layout.fillWidth: true
+            height: 18
+            radius: 4
+            visible: root.midLeftTab === "agenda"
+            color: root.worktimeData && root.worktimeData.is_worktime ? Qt.rgba(0, 0.9, 1.0, 0.15) : Qt.rgba(0.06, 0.10, 0.14, 0.6)
+            border.color: root.worktimeData && root.worktimeData.is_worktime ? Qt.rgba(0, 0.9, 1.0, 0.4) : Qt.rgba(1, 1, 1, 0.12)
+            border.width: 1
+
+            RowLayout {
+              anchors.fill: parent
+              anchors.leftMargin: 6
+              anchors.rightMargin: 6
+              spacing: 4
+
+              Text {
+                text: "⏱"
+                font.pixelSize: 8
+              }
+
+              Text {
+                text: "WORK: " + (root.worktimeData && root.worktimeData.start ? (root.worktimeData.start + "-" + root.worktimeData.end) : "09:00-18:00")
+                color: root.worktimeData && root.worktimeData.is_worktime ? "#00f0ff" : Qt.rgba(1, 1, 1, 0.6)
+                font.pixelSize: 8
+                font.bold: true
+                font.family: "monospace"
+              }
+
+              Item { Layout.fillWidth: true }
+
+              Text {
+                text: root.worktimeData && root.worktimeData.status_text ? root.worktimeData.status_text : "Off Duty"
+                color: root.worktimeData && root.worktimeData.is_worktime ? "#00ff88" : Qt.rgba(1, 1, 1, 0.45)
+                font.pixelSize: 7
+                font.family: "monospace"
+                elide: Text.ElideRight
+              }
+            }
+
+            MouseArea {
+              anchors.fill: parent
+              cursorShape: Qt.PointingHandCursor
+              onClicked: {
+                root.scratchpadModalOpen = true
+                root.midLeftTab = "agenda"
+              }
+            }
+          }
+
           // ------------------------------------------------------------------
           // VIEW 1: TASK ITEMS LIST (visible when midLeftTab === "tasks")
           // ------------------------------------------------------------------
@@ -2036,12 +2140,25 @@ Item {
               TextInput {
                 id: deskTaskInput
                 Layout.fillWidth: true
+                activeFocusOnTab: false
                 color: "#ffffff"
                 font.pixelSize: 9
                 font.family: "system-ui, sans-serif"
                 clip: true
                 selectByMouse: true
                 selectionColor: "#ff0838"
+
+                Keys.priority: Keys.BeforeItem
+                Keys.onPressed: function(event) {
+                  if (event.key === Qt.Key_Escape) {
+                    deskTaskInput.focus = false
+                    event.accepted = true
+                  } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+                    root.midLeftTab = "agenda"
+                    deskAgendaInput.forceActiveFocus()
+                    event.accepted = true
+                  }
+                }
 
                 Text {
                   anchors.fill: parent
@@ -2084,12 +2201,25 @@ Item {
               TextInput {
                 id: deskAgendaInput
                 Layout.fillWidth: true
+                activeFocusOnTab: false
                 color: "#ffffff"
                 font.pixelSize: 9
                 font.family: "system-ui, sans-serif"
                 clip: true
                 selectByMouse: true
                 selectionColor: "#00f0ff"
+
+                Keys.priority: Keys.BeforeItem
+                Keys.onPressed: function(event) {
+                  if (event.key === Qt.Key_Escape) {
+                    deskAgendaInput.focus = false
+                    event.accepted = true
+                  } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+                    root.midLeftTab = "tasks"
+                    deskTaskInput.forceActiveFocus()
+                    event.accepted = true
+                  }
+                }
 
                 Text {
                   anchors.fill: parent
@@ -2206,7 +2336,7 @@ Item {
             MouseArea {
               anchors.fill: parent; cursorShape: Qt.PointingHandCursor
               onClicked: {
-                quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Phone Companion Hub", root.homeDir + "/.local/bin/milo-phone"]
+                quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Phone Companion Hub", "/home/jeffy/.local/bin/milo-phone"]
                 quickCmdProc.running = true
                 root.triggerShockwave()
               }
@@ -2275,7 +2405,7 @@ Item {
         MouseArea {
           anchors.fill: parent; cursorShape: Qt.PointingHandCursor
           onClicked: {
-            quickCmdProc.command = [root.homeDir + "/.local/bin/milo-game", "off"]
+            quickCmdProc.command = ["/home/jeffy/.local/bin/milo-game", "off"]
             quickCmdProc.running = true
             root.triggerShockwave()
           }
@@ -2376,7 +2506,7 @@ Item {
             MouseArea {
               anchors.fill: parent; cursorShape: Qt.PointingHandCursor
               onClicked: {
-                quickCmdProc.command = [root.homeDir + "/.local/bin/milo-files"]
+                quickCmdProc.command = ["/home/jeffy/.local/bin/milo-files"]
                 quickCmdProc.running = true
                 root.triggerShockwave()
               }
@@ -2426,7 +2556,7 @@ Item {
               MouseArea {
                 anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                 onClicked: {
-                  quickCmdProc.command = [root.homeDir + "/.local/bin/milo-game", "toggle"]
+                  quickCmdProc.command = ["/home/jeffy/.local/bin/milo-game", "toggle"]
                   quickCmdProc.running = true
                   root.triggerShockwave()
                 }
@@ -2553,7 +2683,7 @@ Item {
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
-                  quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Cyber Soundtrack", root.homeDir + "/.local/bin/milo-music", "tui"]
+                  quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Cyber Soundtrack", "/home/jeffy/.local/bin/milo-music", "tui"]
                   quickCmdProc.running = true
                   root.triggerShockwave()
                 }
@@ -2594,7 +2724,7 @@ Item {
                   hoverEnabled: true
                   cursorShape: Qt.PointingHandCursor
                   onClicked: {
-                    quickCmdProc.command = [root.homeDir + "/.local/bin/milo-music", "pick"]
+                    quickCmdProc.command = ["/home/jeffy/.local/bin/milo-music", "pick"]
                     quickCmdProc.running = true
                     root.triggerShockwave()
                   }
@@ -2638,7 +2768,7 @@ Item {
                 anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                 hoverEnabled: true
                 onClicked: {
-                  quickCmdProc.command = [root.homeDir + "/.local/bin/milo-music", "prev"]
+                  quickCmdProc.command = ["/home/jeffy/.local/bin/milo-music", "prev"]
                   quickCmdProc.running = true
                   root.triggerShockwave()
                   if (!mediaProc.running) mediaProc.running = true
@@ -2656,7 +2786,7 @@ Item {
                 anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                 hoverEnabled: true
                 onClicked: {
-                  quickCmdProc.command = [root.homeDir + "/.local/bin/milo-music", "play-pause"]
+                  quickCmdProc.command = ["/home/jeffy/.local/bin/milo-music", "play-pause"]
                   quickCmdProc.running = true
                   root.triggerShockwave()
                   if (!mediaProc.running) mediaProc.running = true
@@ -2674,7 +2804,7 @@ Item {
                 anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                 hoverEnabled: true
                 onClicked: {
-                  quickCmdProc.command = [root.homeDir + "/.local/bin/milo-music", "next"]
+                  quickCmdProc.command = ["/home/jeffy/.local/bin/milo-music", "next"]
                   quickCmdProc.running = true
                   root.triggerShockwave()
                   if (!mediaProc.running) mediaProc.running = true
@@ -2741,7 +2871,7 @@ Item {
               }
               MouseArea {
                 anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                onClicked: { quickCmdProc.command = [root.homeDir + "/.local/bin/milo-files"]; quickCmdProc.running = true; root.triggerShockwave() }
+                onClicked: { quickCmdProc.command = ["/home/jeffy/.local/bin/milo-files"]; quickCmdProc.running = true; root.triggerShockwave() }
               }
             }
 
@@ -2805,7 +2935,7 @@ Item {
               }
               MouseArea {
                 anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                onClicked: { quickCmdProc.command = [root.homeDir + "/.local/bin/milo-notes"]; quickCmdProc.running = true; root.triggerShockwave() }
+                onClicked: { quickCmdProc.command = ["/home/jeffy/.local/bin/milo-notes"]; quickCmdProc.running = true; root.triggerShockwave() }
               }
             }
 
@@ -2970,7 +3100,7 @@ Item {
                     anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                     onClicked: {
                       if (modelData.name.indexOf("GAME") !== -1) {
-                        quickCmdProc.command = [root.homeDir + "/.local/bin/milo-game", "toggle"]
+                        quickCmdProc.command = ["/home/jeffy/.local/bin/milo-game", "toggle"]
                         quickCmdProc.running = true
                         root.triggerShockwave()
                         return
@@ -2979,10 +3109,10 @@ Item {
                       root.promptPlaceholder = modelData.hint
                       root.triggerShockwave()
                       if (modelData.name === "📁 ARCHIVE") {
-                        quickCmdProc.command = [root.homeDir + "/.local/bin/milo-files"]
+                        quickCmdProc.command = ["/home/jeffy/.local/bin/milo-files"]
                         quickCmdProc.running = true
                       } else if (modelData.name === "🎵 AUDIO") {
-                        quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Cyber Soundtrack", root.homeDir + "/.local/bin/milo-music", "tui"]
+                        quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Cyber Soundtrack", "/home/jeffy/.local/bin/milo-music", "tui"]
                         quickCmdProc.running = true
                       } else if (modelData.name === "⚡ COMMANDS") {
                         quickCmdProc.command = ["/usr/bin/fuzzel"]
@@ -3142,7 +3272,7 @@ Item {
                   anchors.fill: parent
                   cursorShape: Qt.PointingHandCursor
                   onClicked: {
-                    quickCmdProc.command = [root.homeDir + "/.local/bin/milo-listen"]
+                    quickCmdProc.command = ["/home/jeffy/.local/bin/milo-listen"]
                     quickCmdProc.running = true
                     root.triggerShockwave()
                   }
@@ -3189,7 +3319,7 @@ Item {
                 Text { id: chipText1; anchors.centerIn: parent; text: "📁 Browse Code Archive"; color: Qt.rgba(1, 1, 1, 0.7); font.pixelSize: 9 }
                 MouseArea {
                   anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                  onClicked: { quickCmdProc.command = [root.homeDir + "/.local/bin/milo-files"]; quickCmdProc.running = true; root.triggerShockwave() }
+                  onClicked: { quickCmdProc.command = ["/home/jeffy/.local/bin/milo-files"]; quickCmdProc.running = true; root.triggerShockwave() }
                 }
               }
 
@@ -3199,7 +3329,7 @@ Item {
                 Text { id: chipText2; anchors.centerIn: parent; text: "🎵 Milo Soundtrack"; color: Qt.rgba(1, 1, 1, 0.7); font.pixelSize: 9 }
                 MouseArea {
                   anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                  onClicked: { quickCmdProc.command = [root.homeDir + "/.local/bin/milo-music", "play-pause"]; quickCmdProc.running = true; root.triggerShockwave(); if (!mediaProc.running) mediaProc.running = true }
+                  onClicked: { quickCmdProc.command = ["/home/jeffy/.local/bin/milo-music", "play-pause"]; quickCmdProc.running = true; root.triggerShockwave(); if (!mediaProc.running) mediaProc.running = true }
                 }
               }
 
@@ -3396,7 +3526,7 @@ Item {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
-                  quickCmdProc.command = ["swayimg", root.homeDir + "/.local/state/milo/eyes/current_camera_capture.jpg"]
+                  quickCmdProc.command = ["swayimg", "/home/jeffy/.local/state/milo/eyes/current_camera_capture.jpg"]
                   quickCmdProc.running = true
                 }
               }
@@ -3545,7 +3675,7 @@ Item {
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
-                  quickCmdProc.command = ["foot", "-H", "-a", "milo-floating", "-T", "MILO // Upgrade Code Inspector", root.homeDir + "/.local/bin/milo-evolve", "diff"]
+                  quickCmdProc.command = ["foot", "-H", "-a", "milo-floating", "-T", "MILO // Upgrade Code Inspector", "/home/jeffy/.local/bin/milo-evolve", "diff"]
                   quickCmdProc.running = true
                 }
               }
@@ -3580,7 +3710,17 @@ Item {
       exclusionMode: ExclusionMode.Ignore
       WlrLayershell.namespace: "milo-scratchpad-modal"
       WlrLayershell.layer: WlrLayer.Overlay
-      WlrLayershell.keyboardFocus: WlrKeyboardFocus.OnDemand
+      WlrLayershell.keyboardFocus: root.scratchpadModalOpen ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+
+      onVisibleChanged: {
+        if (visible) {
+          if (root.midLeftTab === "tasks") {
+            modalTaskInput.forceActiveFocus()
+          } else {
+            modalAgendaInput.forceActiveFocus()
+          }
+        }
+      }
 
       // Scrim background
       Rectangle {
@@ -3593,9 +3733,26 @@ Item {
         }
       }
 
-      Item {
+      FocusScope {
         id: modalRootItem
         anchors.fill: parent
+        focus: root.scratchpadModalOpen
+
+        Keys.priority: Keys.BeforeItem
+        Keys.onPressed: function(event) {
+          if (event.key === Qt.Key_Escape) {
+            root.scratchpadModalOpen = false
+            event.accepted = true
+          } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+            root.midLeftTab = (root.midLeftTab === "tasks" ? "agenda" : "tasks")
+            if (root.midLeftTab === "tasks") {
+              modalTaskInput.forceActiveFocus()
+            } else {
+              modalAgendaInput.forceActiveFocus()
+            }
+            event.accepted = true
+          }
+        }
 
         // Centered Modal Window
         Rectangle {
@@ -3931,12 +4088,25 @@ Item {
               TextInput {
                 id: modalTaskInput
                 Layout.fillWidth: true
+                activeFocusOnTab: false
                 color: "#ffffff"
                 font.pixelSize: 11
                 font.family: "system-ui, sans-serif"
                 clip: true
                 selectByMouse: true
                 selectionColor: "#ff0838"
+
+                Keys.priority: Keys.BeforeItem
+                Keys.onPressed: function(event) {
+                  if (event.key === Qt.Key_Escape) {
+                    root.scratchpadModalOpen = false
+                    event.accepted = true
+                  } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+                    root.midLeftTab = "agenda"
+                    modalAgendaInput.forceActiveFocus()
+                    event.accepted = true
+                  }
+                }
 
                 Text {
                   anchors.fill: parent
@@ -4129,6 +4299,145 @@ Item {
             }
           }
 
+          // Worktime Management Banner (Modal)
+          Rectangle {
+            Layout.fillWidth: true
+            height: 32
+            radius: 6
+            visible: root.midLeftTab === "agenda"
+            color: root.worktimeData && root.worktimeData.is_worktime ? Qt.rgba(0, 0.9, 1.0, 0.12) : Qt.rgba(0.05, 0.08, 0.12, 0.7)
+            border.color: root.worktimeData && root.worktimeData.is_worktime ? "#00f0ff" : Qt.rgba(0, 0.8, 1.0, 0.3)
+            border.width: 1
+
+            RowLayout {
+              anchors.fill: parent
+              anchors.leftMargin: 10
+              anchors.rightMargin: 10
+              spacing: 8
+
+              Text {
+                text: "⏱ DAILY WORKTIME:"
+                color: "#80f5ff"
+                font.pixelSize: 10
+                font.bold: true
+                font.family: "monospace"
+              }
+
+              // Work hours badge
+              Rectangle {
+                height: 20
+                width: wtHoursLabel.implicitWidth + 12
+                radius: 4
+                color: root.worktimeData && root.worktimeData.is_worktime ? "#00f0ff" : Qt.rgba(0, 0.9, 1.0, 0.2)
+                Text {
+                  id: wtHoursLabel
+                  anchors.centerIn: parent
+                  text: (root.worktimeData && root.worktimeData.start ? (root.worktimeData.start + " - " + root.worktimeData.end) : "09:00 - 18:00")
+                  color: root.worktimeData && root.worktimeData.is_worktime ? "#060102" : "#80f5ff"
+                  font.pixelSize: 10
+                  font.bold: true
+                  font.family: "monospace"
+                }
+              }
+
+              // Live Status Badge
+              Rectangle {
+                height: 20
+                width: wtStatusLabel.implicitWidth + 12
+                radius: 4
+                color: root.worktimeData && root.worktimeData.is_worktime ? Qt.rgba(0, 1.0, 0.5, 0.2) : Qt.rgba(1, 1, 1, 0.1)
+                border.color: root.worktimeData && root.worktimeData.is_worktime ? "#00ff88" : Qt.rgba(1, 1, 1, 0.2)
+                border.width: 1
+                Text {
+                  id: wtStatusLabel
+                  anchors.centerIn: parent
+                  text: root.worktimeData && root.worktimeData.status_text ? root.worktimeData.status_text : "Off Duty"
+                  color: root.worktimeData && root.worktimeData.is_worktime ? "#00ff88" : Qt.rgba(1, 1, 1, 0.6)
+                  font.pixelSize: 9
+                  font.family: "monospace"
+                }
+              }
+
+              Item { Layout.fillWidth: true }
+
+              Text {
+                text: "Presets:"
+                color: Qt.rgba(1, 1, 1, 0.4)
+                font.pixelSize: 9
+                font.family: "monospace"
+              }
+
+              // Preset chip: 09:00-18:00
+              Rectangle {
+                height: 20
+                width: p1Label.implicitWidth + 10
+                radius: 3
+                color: Qt.rgba(0, 0.9, 1.0, 0.15)
+                border.color: Qt.rgba(0, 0.9, 1.0, 0.4)
+                border.width: 1
+                Text {
+                  id: p1Label
+                  anchors.centerIn: parent
+                  text: "09-18"
+                  color: "#b0f4ff"
+                  font.pixelSize: 8
+                  font.family: "monospace"
+                }
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.setWorktime("09:00-18:00")
+                }
+              }
+
+              // Preset chip: 10:00-19:00
+              Rectangle {
+                height: 20
+                width: p2Label.implicitWidth + 10
+                radius: 3
+                color: Qt.rgba(0, 0.9, 1.0, 0.15)
+                border.color: Qt.rgba(0, 0.9, 1.0, 0.4)
+                border.width: 1
+                Text {
+                  id: p2Label
+                  anchors.centerIn: parent
+                  text: "10-19"
+                  color: "#b0f4ff"
+                  font.pixelSize: 8
+                  font.family: "monospace"
+                }
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.setWorktime("10:00-19:00")
+                }
+              }
+
+              // Preset chip: 08:00-17:00
+              Rectangle {
+                height: 20
+                width: p3Label.implicitWidth + 10
+                radius: 3
+                color: Qt.rgba(0, 0.9, 1.0, 0.15)
+                border.color: Qt.rgba(0, 0.9, 1.0, 0.4)
+                border.width: 1
+                Text {
+                  id: p3Label
+                  anchors.centerIn: parent
+                  text: "08-17"
+                  color: "#b0f4ff"
+                  font.pixelSize: 8
+                  font.family: "monospace"
+                }
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.setWorktime("08:00-17:00")
+                }
+              }
+            }
+          }
+
           // Agenda items (scrollable)
           ScrollView {
             Layout.fillWidth: true
@@ -4309,12 +4618,25 @@ Item {
               TextInput {
                 id: modalAgendaInput
                 Layout.fillWidth: true
+                activeFocusOnTab: false
                 color: "#ffffff"
                 font.pixelSize: 11
                 font.family: "system-ui, sans-serif"
                 clip: true
                 selectByMouse: true
                 selectionColor: "#00f0ff"
+
+                Keys.priority: Keys.BeforeItem
+                Keys.onPressed: function(event) {
+                  if (event.key === Qt.Key_Escape) {
+                    root.scratchpadModalOpen = false
+                    event.accepted = true
+                  } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+                    root.midLeftTab = "tasks"
+                    modalTaskInput.forceActiveFocus()
+                    event.accepted = true
+                  }
+                }
 
                 Text {
                   anchors.fill: parent

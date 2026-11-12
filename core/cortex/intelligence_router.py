@@ -630,6 +630,29 @@ def handle_calendar_intent(prompt: str) -> Optional[Tuple[str, str]]:
         except Exception:
             pass
 
+    # 6. Worktime Query or Configuration: "what are my work hours", "set worktime to 9am to 6pm"
+    wt_set_match = re.search(r'\b(?:set|change|update)\s+(?:my\s+)?(?:work\s*time|work\s*hours)\s+(?:to\s+)?(.+)\b', p)
+    if wt_set_match:
+        target_range = wt_set_match.group(1).strip()
+        try:
+            res = subprocess.run([str(milo_cal_bin), "worktime", "--set", target_range], capture_output=True, text=True, timeout=5)
+            if res.returncode == 0:
+                clean_out = re.sub(r'\x1b\[[0-9;]*m', '', res.stdout.strip())
+                first_line = clean_out.splitlines()[0] if clean_out else f"Work hours set to {target_range}."
+                return first_line, "Milo Calendar Copilot"
+        except Exception as e:
+            return f"Failed to set worktime: {e}", "Milo Calendar Copilot"
+
+    if re.search(r'\b(?:what(?:\'?s|\s+is|\s+are)\s+(?:my\s+)?(?:work\s*time|work\s*hours)|am\s+i\s+(?:in\s+work\s*hours|on\s+duty|working)|work\s*time\s+status)\b', p):
+        try:
+            res = subprocess.run([str(milo_cal_bin), "worktime", "--json"], capture_output=True, text=True, timeout=5)
+            if res.returncode == 0 and res.stdout.strip():
+                wt_info = json.loads(res.stdout.strip())
+                msg = f"Your daily work hours are {wt_info.get('start')} to {wt_info.get('end')}. Currently: {wt_info.get('status_text')}."
+                return msg, "Milo Calendar Copilot"
+        except Exception:
+            pass
+
     return None
 
 
