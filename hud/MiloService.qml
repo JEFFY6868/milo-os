@@ -54,6 +54,10 @@ Item {
   property bool scratchpadModalOpen: false
   property string scratchpadFilter: "all"  // "all" | "pending" | "completed"
   property string midLeftTab: "tasks"      // "tasks" | "agenda"
+  property bool tasksWrapAll: false
+  property bool modalTasksWrapAll: false
+  property int expandedDeskTaskIndex: -1
+  property int expandedModalTaskIndex: -1
   property var agendaList: []
   property var worktimeData: ({
     start: "09:00",
@@ -415,7 +419,7 @@ Item {
   function toggleTodo(index) {
     var list = []
     for (var i = 0; i < root.todosList.length; i++) {
-      var item = { id: root.todosList[i].id, text: root.todosList[i].text, done: root.todosList[i].done }
+      var item = { id: root.todosList[i].id, text: root.todosList[i].text, done: root.todosList[i].done, created_at: root.todosList[i].created_at || "" }
       if (i === index) item.done = !item.done
       list.push(item)
     }
@@ -1999,6 +2003,60 @@ Item {
             }
           }
 
+          // Tasks Mini-Toolbar & Wrap Mode Pill (Desktop HUD)
+          Rectangle {
+            Layout.fillWidth: true
+            height: 18
+            radius: 4
+            visible: root.midLeftTab === "tasks"
+            color: Qt.rgba(0.12, 0.01, 0.03, 0.5)
+            border.color: Qt.rgba(1, 0.03, 0.22, 0.25)
+            border.width: 1
+
+            RowLayout {
+              anchors.fill: parent
+              anchors.leftMargin: 6
+              anchors.rightMargin: 6
+              spacing: 6
+
+              Text {
+                text: "📋 ACTIVE MISSIONS"
+                color: Qt.rgba(1, 0.3, 0.4, 0.9)
+                font.pixelSize: 8
+                font.bold: true
+                font.family: "monospace"
+              }
+
+              Item { Layout.fillWidth: true }
+
+              // Wrap Toggle Pill
+              Rectangle {
+                height: 14
+                width: wrapBadgeText.implicitWidth + 8
+                radius: 3
+                color: root.tasksWrapAll ? "#ff0838" : Qt.rgba(1, 0.03, 0.22, 0.2)
+                border.color: root.tasksWrapAll ? "#ffffff" : Qt.rgba(1, 0.03, 0.22, 0.4)
+                border.width: 1
+
+                Text {
+                  id: wrapBadgeText
+                  anchors.centerIn: parent
+                  text: root.tasksWrapAll ? "☰ WRAP ON" : "⋯ EXPAND"
+                  color: root.tasksWrapAll ? "#ffffff" : "#ff8899"
+                  font.pixelSize: 7
+                  font.bold: true
+                  font.family: "monospace"
+                }
+
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.tasksWrapAll = !root.tasksWrapAll
+                }
+              }
+            }
+          }
+
           // ------------------------------------------------------------------
           // VIEW 1: TASK ITEMS LIST (visible when midLeftTab === "tasks")
           // ------------------------------------------------------------------
@@ -2019,21 +2077,27 @@ Item {
                   required property var modelData
                   required property int index
                   Layout.fillWidth: true
-                  height: 24
+                  property bool isLong: (modelData.text && modelData.text.length > 22)
+                  property bool isExpanded: root.tasksWrapAll || (root.expandedDeskTaskIndex === index)
+                  height: isExpanded ? Math.max(26, deskTaskText.contentHeight + 10) : 24
                   radius: 5
-                  color: Qt.rgba(1, 0.03, 0.22, modelData.done ? 0.15 : 0.06)
+                  color: isExpanded ? Qt.rgba(1, 0.03, 0.22, modelData.done ? 0.20 : 0.12) : Qt.rgba(1, 0.03, 0.22, modelData.done ? 0.15 : 0.06)
+                  border.color: isExpanded ? Qt.rgba(1, 0.03, 0.22, 0.5) : "transparent"
+                  border.width: isExpanded ? 1 : 0
 
                   RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: 6
                     anchors.rightMargin: 6
-                    spacing: 7
+                    spacing: 6
 
                     // Checkbox
                     Rectangle {
                       width: 13; height: 13; radius: 3
                       color: modelData.done ? "#ff0838" : "transparent"
                       border.color: "#ff0838"; border.width: 1
+                      Layout.alignment: todoRow.isExpanded ? Qt.AlignTop : Qt.AlignVCenter
+                      Layout.topMargin: todoRow.isExpanded ? 4 : 0
                       Text {
                         anchors.centerIn: parent
                         text: "✓"
@@ -2050,17 +2114,44 @@ Item {
 
                     // Text
                     Text {
+                      id: deskTaskText
                       Layout.fillWidth: true
                       text: modelData.text || ""
                       color: modelData.done ? Qt.rgba(1, 1, 1, 0.4) : "#ffffff"
                       font.strikeout: modelData.done
                       font.pixelSize: 10
                       font.family: "system-ui, sans-serif"
-                      elide: Text.ElideRight
+                      wrapMode: todoRow.isExpanded ? Text.Wrap : Text.NoWrap
+                      elide: todoRow.isExpanded ? Text.ElideNone : Text.ElideRight
+
                       MouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: root.toggleTodo(index)
+                        onClicked: {
+                          if (todoRow.isLong) {
+                            root.expandedDeskTaskIndex = (root.expandedDeskTaskIndex === index ? -1 : index)
+                          } else {
+                            root.toggleTodo(index)
+                          }
+                        }
+                      }
+                    }
+
+                    // Expand indicator chevron
+                    Text {
+                      visible: todoRow.isLong && !root.tasksWrapAll
+                      text: todoRow.isExpanded ? "▲" : "▼"
+                      color: todoRow.isExpanded ? "#ff0838" : Qt.rgba(1, 1, 1, 0.45)
+                      font.pixelSize: 8
+                      font.bold: true
+                      Layout.alignment: todoRow.isExpanded ? Qt.AlignTop : Qt.AlignVCenter
+                      Layout.topMargin: todoRow.isExpanded ? 4 : 0
+                      MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                          root.expandedDeskTaskIndex = (root.expandedDeskTaskIndex === index ? -1 : index)
+                        }
                       }
                     }
 
@@ -2070,6 +2161,8 @@ Item {
                       color: Qt.rgba(1, 0.2, 0.3, 0.7)
                       font.pixelSize: 12
                       font.bold: true
+                      Layout.alignment: todoRow.isExpanded ? Qt.AlignTop : Qt.AlignVCenter
+                      Layout.topMargin: todoRow.isExpanded ? 2 : 0
                       MouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
@@ -2195,8 +2288,10 @@ Item {
           // INPUT 1: Add Task Row (visible when midLeftTab === "tasks")
           // ------------------------------------------------------------------
           Rectangle {
+            id: deskTaskInputContainer
             Layout.fillWidth: true
-            height: 24; radius: 5
+            height: Math.min(56, Math.max(26, deskTaskInput.contentHeight + 8))
+            radius: 5
             color: Qt.rgba(0.12, 0.01, 0.03, 0.85)
             border.color: deskTaskInput.activeFocus ? "#ff0838" : Qt.rgba(1, 0.03, 0.22, 0.4)
             border.width: 1
@@ -2205,48 +2300,76 @@ Item {
             RowLayout {
               anchors.fill: parent
               anchors.leftMargin: 6; anchors.rightMargin: 6
+              anchors.topMargin: 4; anchors.bottomMargin: 4
               spacing: 6
 
-              Text { text: "+"; color: "#ff2a55"; font.pixelSize: 12; font.bold: true }
+              Text {
+                text: "+"
+                color: "#ff2a55"
+                font.pixelSize: 12
+                font.bold: true
+                Layout.alignment: Qt.AlignTop
+              }
 
-              TextInput {
+              TextEdit {
                 id: deskTaskInput
                 Layout.fillWidth: true
+                Layout.fillHeight: true
                 activeFocusOnTab: false
                 color: "#ffffff"
                 font.pixelSize: 9
                 font.family: "system-ui, sans-serif"
-                clip: true
+                wrapMode: TextEdit.Wrap
                 selectByMouse: true
                 selectionColor: "#ff0838"
 
                 Keys.priority: Keys.BeforeItem
                 Keys.onPressed: function(event) {
-                  if (event.key === Qt.Key_Escape) {
+                  if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                    if (!(event.modifiers & Qt.ShiftModifier)) {
+                      var val = deskTaskInput.text.trim()
+                      if (val.length > 0) {
+                        root.addTodo(val)
+                        deskTaskInput.text = ""
+                      }
+                      event.accepted = true
+                      return
+                    }
+                  } else if (event.key === Qt.Key_Escape) {
                     deskTaskInput.focus = false
                     event.accepted = true
+                    return
                   } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
                     root.midLeftTab = "agenda"
                     deskAgendaInput.forceActiveFocus()
                     event.accepted = true
+                    return
                   }
                 }
 
                 Text {
                   anchors.fill: parent
+                  anchors.topMargin: 1
                   text: "+ Add task & hit Enter..."
                   color: Qt.rgba(1, 1, 1, 0.40)
                   font.pixelSize: 9
                   font.family: "system-ui, sans-serif"
                   visible: !deskTaskInput.text && !deskTaskInput.activeFocus
                 }
+              }
 
-                onAccepted: {
-                  var val = deskTaskInput.text.trim()
-                  if (val.length > 0) {
-                    root.addTodo(val)
-                    deskTaskInput.text = ""
-                  }
+              // Clear button
+              Text {
+                text: "×"
+                color: Qt.rgba(1, 1, 1, 0.5)
+                font.pixelSize: 12
+                font.bold: true
+                visible: deskTaskInput.text.length > 0
+                Layout.alignment: Qt.AlignTop
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: deskTaskInput.text = ""
                 }
               }
             }
@@ -2310,6 +2433,75 @@ Item {
                   }
                 }
               }
+            }
+          }
+        }
+
+        // Floating Live Typing Preview for Long Tasks in Desktop HUD
+        Rectangle {
+          id: deskTaskTypingOverlay
+          z: 99
+          visible: root.midLeftTab === "tasks" && deskTaskInput.activeFocus && deskTaskInput.text.trim().length > 18
+          anchors.bottom: parent.bottom
+          anchors.bottomMargin: deskTaskInputContainer.height + 14
+          anchors.left: parent.left
+          anchors.leftMargin: 8
+          anchors.right: parent.right
+          anchors.rightMargin: 8
+          height: Math.min(130, deskTypingCol.implicitHeight + 16)
+          radius: 7
+          color: Qt.rgba(0.07, 0.01, 0.02, 0.96)
+          border.color: "#ff0838"
+          border.width: 1.2
+          clip: true
+
+          ColumnLayout {
+            id: deskTypingCol
+            anchors.fill: parent
+            anchors.margins: 8
+            spacing: 4
+
+            RowLayout {
+              Layout.fillWidth: true
+              Text {
+                text: "✦ TYPING PREVIEW"
+                color: "#ff2a55"
+                font.pixelSize: 8
+                font.bold: true
+                font.family: "monospace"
+              }
+              Item { Layout.fillWidth: true }
+              Text {
+                text: {
+                  var words = deskTaskInput.text.trim().split(/\s+/).filter(Boolean).length
+                  return words + " w · " + deskTaskInput.text.length + " ch"
+                }
+                color: Qt.rgba(1, 1, 1, 0.6)
+                font.pixelSize: 8
+                font.family: "monospace"
+              }
+            }
+
+            ScrollView {
+              Layout.fillWidth: true
+              Layout.fillHeight: true
+              clip: true
+
+              Text {
+                width: deskTypingCol.width
+                text: deskTaskInput.text
+                color: "#ffffff"
+                font.pixelSize: 10
+                font.family: "system-ui, sans-serif"
+                wrapMode: Text.Wrap
+              }
+            }
+
+            Text {
+              text: "↵ Enter to add · ⎋ Esc to unfocus"
+              color: Qt.rgba(1, 1, 1, 0.35)
+              font.pixelSize: 7
+              font.family: "monospace"
             }
           }
         }
@@ -4063,6 +4255,32 @@ Item {
 
             Item { Layout.fillWidth: true }
 
+            // Toggle Wrap All for Modal
+            Rectangle {
+              height: 24
+              width: modalWrapText.implicitWidth + 14
+              radius: 4
+              color: root.modalTasksWrapAll ? "#ff0838" : Qt.rgba(1, 0.03, 0.22, 0.15)
+              border.color: root.modalTasksWrapAll ? "#ffffff" : Qt.rgba(1, 0.03, 0.22, 0.4)
+              border.width: 1
+
+              Text {
+                id: modalWrapText
+                anchors.centerIn: parent
+                text: root.modalTasksWrapAll ? "☰ WRAP ALL ON" : "⋯ EXPAND ALL"
+                color: root.modalTasksWrapAll ? "#ffffff" : "#ff8899"
+                font.pixelSize: 9
+                font.bold: true
+                font.family: "monospace"
+              }
+
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.modalTasksWrapAll = !root.modalTasksWrapAll
+              }
+            }
+
             // Clear completed button
             Rectangle {
               height: 24
@@ -4128,12 +4346,15 @@ Item {
                 }
 
                 delegate: Rectangle {
+                  id: modalTaskRow
                   required property var modelData
                   Layout.fillWidth: true
-                  height: 32
+                  property bool isLong: (modelData.data.text && modelData.data.text.length > 45)
+                  property bool isExpanded: root.modalTasksWrapAll || (root.expandedModalTaskIndex === modelData.origIdx)
+                  height: isExpanded ? Math.max(34, modalTaskText.contentHeight + 16) : 34
                   radius: 6
-                  color: Qt.rgba(1, 0.03, 0.22, modelData.data.done ? 0.12 : 0.07)
-                  border.color: modelData.data.done ? Qt.rgba(1, 0.03, 0.22, 0.2) : Qt.rgba(1, 0.03, 0.22, 0.35)
+                  color: isExpanded ? Qt.rgba(1, 0.03, 0.22, modelData.data.done ? 0.18 : 0.12) : Qt.rgba(1, 0.03, 0.22, modelData.data.done ? 0.12 : 0.07)
+                  border.color: isExpanded ? Qt.rgba(1, 0.03, 0.22, 0.6) : (modelData.data.done ? Qt.rgba(1, 0.03, 0.22, 0.2) : Qt.rgba(1, 0.03, 0.22, 0.35))
                   border.width: 1
 
                   RowLayout {
@@ -4147,6 +4368,8 @@ Item {
                       width: 16; height: 16; radius: 4
                       color: modelData.data.done ? "#ff0838" : "transparent"
                       border.color: "#ff0838"; border.width: 1.2
+                      Layout.alignment: modalTaskRow.isExpanded ? Qt.AlignTop : Qt.AlignVCenter
+                      Layout.topMargin: modalTaskRow.isExpanded ? 3 : 0
                       Text {
                         anchors.centerIn: parent
                         text: "✓"
@@ -4164,17 +4387,56 @@ Item {
 
                     // Task text
                     Text {
+                      id: modalTaskText
                       Layout.fillWidth: true
                       text: modelData.data.text || ""
                       color: modelData.data.done ? Qt.rgba(1, 1, 1, 0.4) : "#ffffff"
                       font.strikeout: modelData.data.done
                       font.pixelSize: 11
                       font.family: "system-ui, sans-serif"
-                      elide: Text.ElideRight
+                      wrapMode: modalTaskRow.isExpanded ? Text.Wrap : Text.NoWrap
+                      elide: modalTaskRow.isExpanded ? Text.ElideNone : Text.ElideRight
+
                       MouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: root.toggleTodo(modelData.origIdx)
+                        onClicked: {
+                          if (modalTaskRow.isLong) {
+                            root.expandedModalTaskIndex = (root.expandedModalTaskIndex === modelData.origIdx ? -1 : modelData.origIdx)
+                          } else {
+                            root.toggleTodo(modelData.origIdx)
+                          }
+                        }
+                      }
+                    }
+
+                    // Expand badge pill for long tasks
+                    Rectangle {
+                      visible: modalTaskRow.isLong && !root.modalTasksWrapAll
+                      height: 18
+                      width: 50
+                      radius: 3
+                      color: modalTaskRow.isExpanded ? "#ff0838" : Qt.rgba(1, 0.03, 0.22, 0.2)
+                      border.color: Qt.rgba(1, 0.03, 0.22, 0.5)
+                      border.width: 1
+                      Layout.alignment: modalTaskRow.isExpanded ? Qt.AlignTop : Qt.AlignVCenter
+                      Layout.topMargin: modalTaskRow.isExpanded ? 2 : 0
+
+                      Text {
+                        anchors.centerIn: parent
+                        text: modalTaskRow.isExpanded ? "▲ LESS" : "▼ MORE"
+                        color: "#ffffff"
+                        font.pixelSize: 8
+                        font.bold: true
+                        font.family: "monospace"
+                      }
+
+                      MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                          root.expandedModalTaskIndex = (root.expandedModalTaskIndex === modelData.origIdx ? -1 : modelData.origIdx)
+                        }
                       }
                     }
 
@@ -4185,12 +4447,16 @@ Item {
                       font.pixelSize: 9
                       font.family: "monospace"
                       visible: !!modelData.data.created_at
+                      Layout.alignment: modalTaskRow.isExpanded ? Qt.AlignTop : Qt.AlignVCenter
+                      Layout.topMargin: modalTaskRow.isExpanded ? 3 : 0
                     }
 
                     // Delete button
                     Rectangle {
                       width: 18; height: 18; radius: 3
                       color: "transparent"
+                      Layout.alignment: modalTaskRow.isExpanded ? Qt.AlignTop : Qt.AlignVCenter
+                      Layout.topMargin: modalTaskRow.isExpanded ? 2 : 0
                       Text {
                         anchors.centerIn: parent
                         text: "×"
@@ -4210,10 +4476,11 @@ Item {
             }
           }
 
-          // Add Task Input Box
+          // Add Task Input Box (Auto-Expanding Multi-line with Word Wrapping)
           Rectangle {
+            id: modalTaskInputContainer
             Layout.fillWidth: true
-            height: 34
+            height: Math.min(100, Math.max(38, modalTaskInput.contentHeight + 14))
             radius: 7
             color: Qt.rgba(0.12, 0.01, 0.03, 0.90)
             border.color: modalTaskInput.activeFocus ? "#ff0838" : Qt.rgba(1, 0.03, 0.22, 0.5)
@@ -4224,54 +4491,110 @@ Item {
               anchors.fill: parent
               anchors.leftMargin: 10
               anchors.rightMargin: 6
+              anchors.topMargin: 5
+              anchors.bottomMargin: 5
               spacing: 8
 
-              Text { text: "➕"; font.pixelSize: 12 }
+              Text {
+                text: "➕"
+                font.pixelSize: 12
+                Layout.alignment: Qt.AlignTop
+                Layout.topMargin: 2
+              }
 
-              TextInput {
+              TextEdit {
                 id: modalTaskInput
                 Layout.fillWidth: true
+                Layout.fillHeight: true
                 activeFocusOnTab: false
                 color: "#ffffff"
                 font.pixelSize: 11
                 font.family: "system-ui, sans-serif"
-                clip: true
+                wrapMode: TextEdit.Wrap
                 selectByMouse: true
                 selectionColor: "#ff0838"
 
                 Keys.priority: Keys.BeforeItem
                 Keys.onPressed: function(event) {
-                  if (event.key === Qt.Key_Escape) {
+                  if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                    if (!(event.modifiers & Qt.ShiftModifier)) {
+                      var val = modalTaskInput.text.trim()
+                      if (val.length > 0) {
+                        root.addTodo(val)
+                        modalTaskInput.text = ""
+                      }
+                      event.accepted = true
+                      return
+                    }
+                  } else if (event.key === Qt.Key_Escape) {
                     root.scratchpadModalOpen = false
                     event.accepted = true
+                    return
                   } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
                     root.midLeftTab = "agenda"
                     modalAgendaInput.forceActiveFocus()
                     event.accepted = true
+                    return
                   }
                 }
 
                 Text {
                   anchors.fill: parent
-                  text: "Type a new mission or task and press Enter..."
+                  anchors.topMargin: 1
+                  text: "Type a new mission or task and press Enter (Shift+Enter for newline)..."
                   color: Qt.rgba(1, 1, 1, 0.40)
                   font.pixelSize: 11
                   font.family: "system-ui, sans-serif"
                   visible: !modalTaskInput.text && !modalTaskInput.activeFocus
                 }
+              }
 
-                onAccepted: {
-                  var val = modalTaskInput.text.trim()
-                  if (val.length > 0) {
-                    root.addTodo(val)
-                    modalTaskInput.text = ""
-                  }
+              // Word counter pill for long tasks
+              Rectangle {
+                visible: modalTaskInput.text.trim().length > 20
+                height: 22
+                width: modalCounterText.implicitWidth + 10
+                radius: 4
+                color: Qt.rgba(0.2, 0.02, 0.05, 0.8)
+                border.color: Qt.rgba(1, 0.03, 0.22, 0.4)
+                border.width: 1
+                Layout.alignment: Qt.AlignTop
+
+                Text {
+                  id: modalCounterText
+                  anchors.centerIn: parent
+                  text: modalTaskInput.text.trim().split(/\s+/).filter(Boolean).length + " w · " + modalTaskInput.text.length + " ch"
+                  color: "#ff8899"
+                  font.pixelSize: 8
+                  font.family: "monospace"
                 }
               }
 
+              // Clear button
               Rectangle {
-                width: 50; height: 24; radius: 4
+                visible: modalTaskInput.text.length > 0
+                width: 22; height: 22; radius: 4
+                color: Qt.rgba(1, 1, 1, 0.08)
+                Layout.alignment: Qt.AlignTop
+                Text {
+                  anchors.centerIn: parent
+                  text: "×"
+                  color: Qt.rgba(1, 1, 1, 0.6)
+                  font.pixelSize: 13
+                  font.bold: true
+                }
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: modalTaskInput.text = ""
+                }
+              }
+
+              // ADD button
+              Rectangle {
+                width: 50; height: 26; radius: 4
                 color: "#ff0838"
+                Layout.alignment: Qt.AlignTop
                 Text {
                   anchors.centerIn: parent
                   text: "ADD"
