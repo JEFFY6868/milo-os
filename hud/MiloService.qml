@@ -100,6 +100,53 @@ Item {
     quickCmdProc.running = true
   }
 
+  // Milo Cyber Soundtrack Hotkey Actions
+  function musicPlayPause() {
+    if (quickCmdProc.running) quickCmdProc.running = false
+    quickCmdProc.command = [root.homeDir + "/.local/bin/milo-music", "play-pause"]
+    quickCmdProc.running = true
+    root.triggerShockwave()
+    mediaRefreshTimer.restart()
+  }
+
+  function musicNext() {
+    if (quickCmdProc.running) quickCmdProc.running = false
+    quickCmdProc.command = [root.homeDir + "/.local/bin/milo-music", "next"]
+    quickCmdProc.running = true
+    root.triggerShockwave()
+    mediaRefreshTimer.restart()
+  }
+
+  function musicPrev() {
+    if (quickCmdProc.running) quickCmdProc.running = false
+    quickCmdProc.command = [root.homeDir + "/.local/bin/milo-music", "prev"]
+    quickCmdProc.running = true
+    root.triggerShockwave()
+    mediaRefreshTimer.restart()
+  }
+
+  function musicPick() {
+    quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Track Picker", root.homeDir + "/.local/bin/milo-music", "pick"]
+    quickCmdProc.running = true
+    root.triggerShockwave()
+  }
+
+  function musicTui() {
+    quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Cyber Soundtrack", root.homeDir + "/.local/bin/milo-music", "tui"]
+    quickCmdProc.running = true
+    root.triggerShockwave()
+  }
+
+  Timer {
+    id: mediaRefreshTimer
+    interval: 350
+    repeat: false
+    running: false
+    onTriggered: {
+      if (!mediaProc.running) mediaProc.running = true
+    }
+  }
+
   // Milo Autonomous Evolution Protocol (MEP-1)
   property bool hasPendingEvolution: false
 
@@ -508,7 +555,7 @@ Item {
 
   Process {
     id: mediaProc
-    command: ["/home/jeffy/.local/bin/milo-music", "status"]
+    command: [root.homeDir + "/.local/bin/milo-music", "status"]
     stdout: StdioCollector {
       onStreamFinished: {
         var out = text.trim()
@@ -965,6 +1012,31 @@ Item {
     function closeScratchpad(): string {
       root.scratchpadModalOpen = false
       return "closed"
+    }
+
+    function musicPlayPause(): string {
+      root.musicPlayPause()
+      return "toggled"
+    }
+
+    function musicNext(): string {
+      root.musicNext()
+      return "next"
+    }
+
+    function musicPrev(): string {
+      root.musicPrev()
+      return "prev"
+    }
+
+    function musicPick(): string {
+      root.musicPick()
+      return "pick"
+    }
+
+    function musicTui(): string {
+      root.musicTui()
+      return "tui"
     }
   }
 
@@ -2603,23 +2675,62 @@ Item {
       }
 
       // ----------------------------------------------------------------------
-      // 5.7 MID-RIGHT: MILO CYBER AUDIO HUB (Spinning Disc)
+      // 5.7 MID-RIGHT: MILO CYBER AUDIO HUB (Spinning Disc & Keyboard Controls)
       // ----------------------------------------------------------------------
       Rectangle {
         id: mediaCard
         anchors.verticalCenter: parent.verticalCenter
         anchors.right: parent.right
         anchors.rightMargin: 35
-        width: 250; height: 180
+        width: 250; height: 185
         radius: 14
         color: Qt.rgba(0.06, 0.01, 0.02, 0.85)
-        border.color: Qt.rgba(1.0, 0.03, 0.22, 0.45)
-        border.width: 1.2
+        border.color: mediaCard.activeFocus ? "#ff0838" : (mediaCardHover.containsMouse ? Qt.rgba(1.0, 0.25, 0.35, 0.6) : Qt.rgba(1.0, 0.03, 0.22, 0.45))
+        border.width: mediaCard.activeFocus ? 1.5 : 1.2
+
+        focus: true
+
+        MouseArea {
+          id: mediaCardHover
+          anchors.fill: parent
+          hoverEnabled: true
+          onClicked: {
+            mediaCard.forceActiveFocus()
+          }
+        }
+
+        Keys.priority: Keys.BeforeItem
+        Keys.onPressed: function(event) {
+          if (event.key === Qt.Key_Space || event.key === Qt.Key_K) {
+            root.musicPlayPause()
+            event.accepted = true
+          } else if (event.key === Qt.Key_Right || event.key === Qt.Key_L || event.key === Qt.Key_N) {
+            root.musicNext()
+            event.accepted = true
+          } else if (event.key === Qt.Key_Left || event.key === Qt.Key_H || event.key === Qt.Key_P) {
+            root.musicPrev()
+            event.accepted = true
+          } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_M) {
+            root.musicPick()
+            event.accepted = true
+          } else if (event.key === Qt.Key_T) {
+            root.musicTui()
+            event.accepted = true
+          } else if (event.key === Qt.Key_S) {
+            quickCmdProc.command = [root.homeDir + "/.local/bin/milo-music", "shuffle"]
+            quickCmdProc.running = true
+            root.triggerShockwave()
+            event.accepted = true
+          } else if (event.key === Qt.Key_Escape) {
+            mediaCard.focus = false
+            event.accepted = true
+          }
+        }
 
         ColumnLayout {
           anchors.fill: parent
           anchors.margins: 12
-          spacing: 8
+          spacing: 7
 
           RowLayout {
             Layout.fillWidth: true
@@ -2631,11 +2742,22 @@ Item {
               font.family: "monospace"
             }
             Item { Layout.fillWidth: true }
-            Text {
-              text: "FLAC 24-BIT"
-              color: Qt.rgba(1, 1, 1, 0.4)
-              font.pixelSize: 9
-              font.family: "monospace"
+            Rectangle {
+              height: 16
+              width: hotkeyIndicatorText.implicitWidth + 8
+              radius: 3
+              color: mediaCard.activeFocus ? "#ff0838" : Qt.rgba(1, 0.03, 0.22, 0.15)
+              border.color: mediaCard.activeFocus ? "#ffffff" : Qt.rgba(1, 0.03, 0.22, 0.35)
+              border.width: 1
+              Text {
+                id: hotkeyIndicatorText
+                anchors.centerIn: parent
+                text: mediaCard.activeFocus ? "⌨ HOTKEYS" : "FLAC 24-BIT"
+                color: mediaCard.activeFocus ? "#ffffff" : Qt.rgba(1, 1, 1, 0.45)
+                font.pixelSize: 8
+                font.bold: mediaCard.activeFocus
+                font.family: "monospace"
+              }
             }
           }
 
@@ -2683,16 +2805,15 @@ Item {
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
-                  quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Cyber Soundtrack", "/home/jeffy/.local/bin/milo-music", "tui"]
-                  quickCmdProc.running = true
-                  root.triggerShockwave()
+                  mediaCard.forceActiveFocus()
+                  root.musicTui()
                 }
               }
             }
 
             ColumnLayout {
               Layout.fillWidth: true
-              spacing: 4
+              spacing: 3
 
               Item {
                 Layout.fillWidth: true
@@ -2724,90 +2845,112 @@ Item {
                   hoverEnabled: true
                   cursorShape: Qt.PointingHandCursor
                   onClicked: {
-                    quickCmdProc.command = ["/home/jeffy/.local/bin/milo-music", "pick"]
-                    quickCmdProc.running = true
-                    root.triggerShockwave()
+                    mediaCard.forceActiveFocus()
+                    root.musicPick()
                   }
                 }
               }
 
-              // Animated Equalizer Waveform Bars
-              Row {
-                spacing: 3
-                Repeater {
-                  model: 5
-                  Rectangle {
-                    width: 3
-                    radius: 1.5
-                    color: root.isPlaying ? "#ff0838" : Qt.rgba(1, 0.03, 0.22, 0.3)
-                    height: root.isPlaying ? 10 : 4
-                    SequentialAnimation on height {
-                      loops: Animation.Infinite
-                      running: root.isPlaying
-                      PropertyAnimation { to: 4 + (index * 3); duration: 250 + (index * 80) }
-                      PropertyAnimation { to: 14 - (index * 2); duration: 250 + (index * 80) }
+              // Animated Equalizer Waveform Bars & Shortcuts Hint
+              RowLayout {
+                Layout.fillWidth: true
+                spacing: 6
+
+                Row {
+                  spacing: 3
+                  Repeater {
+                    model: 5
+                    Rectangle {
+                      width: 3
+                      radius: 1.5
+                      color: root.isPlaying ? "#ff0838" : Qt.rgba(1, 0.03, 0.22, 0.3)
+                      height: root.isPlaying ? 10 : 4
+                      SequentialAnimation on height {
+                        loops: Animation.Infinite
+                        running: root.isPlaying
+                        PropertyAnimation { to: 4 + (index * 3); duration: 250 + (index * 80) }
+                        PropertyAnimation { to: 14 - (index * 2); duration: 250 + (index * 80) }
+                      }
                     }
                   }
+                }
+
+                Item { Layout.fillWidth: true }
+
+                Text {
+                  text: "⏎ Pick · T Tui · S Shuf"
+                  color: Qt.rgba(1, 1, 1, 0.32)
+                  font.pixelSize: 8
+                  font.family: "monospace"
                 }
               }
             }
           }
 
-          // Media Controls (⏮ ⏯ ⏭)
+          // Media Controls (⏮ ⏯ ⏭) with Hotkey Indicators
           RowLayout {
             Layout.fillWidth: true
             spacing: 6
 
             Rectangle {
-              Layout.fillWidth: true; height: 26; radius: 5
+              Layout.fillWidth: true; height: 30; radius: 5
               color: prevMouseArea.containsMouse ? Qt.rgba(1, 0.03, 0.22, 0.35) : Qt.rgba(1, 0.03, 0.22, 0.15)
               border.color: Qt.rgba(1, 0.03, 0.22, 0.4); border.width: 1
-              Text { anchors.centerIn: parent; text: "⏮"; color: "#fff"; font.pixelSize: 11 }
+              ColumnLayout {
+                anchors.centerIn: parent
+                spacing: 1
+                Text { Layout.alignment: Qt.AlignHCenter; text: "⏮"; color: "#fff"; font.pixelSize: 10 }
+                Text { Layout.alignment: Qt.AlignHCenter; text: "Alt+←"; color: Qt.rgba(1, 1, 1, 0.45); font.pixelSize: 7; font.family: "monospace" }
+              }
               MouseArea {
                 id: prevMouseArea
                 anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                 hoverEnabled: true
                 onClicked: {
-                  quickCmdProc.command = ["/home/jeffy/.local/bin/milo-music", "prev"]
-                  quickCmdProc.running = true
-                  root.triggerShockwave()
-                  if (!mediaProc.running) mediaProc.running = true
+                  mediaCard.forceActiveFocus()
+                  root.musicPrev()
                 }
               }
             }
 
             Rectangle {
-              Layout.fillWidth: true; height: 26; radius: 5
+              Layout.fillWidth: true; height: 30; radius: 5
               color: playMouseArea.containsMouse ? Qt.rgba(1, 0.03, 0.22, 0.45) : Qt.rgba(1, 0.03, 0.22, 0.25)
               border.color: "#ff0838"; border.width: 1
-              Text { anchors.centerIn: parent; text: root.isPlaying ? "⏸" : "▶"; color: "#fff"; font.pixelSize: 11 }
+              ColumnLayout {
+                anchors.centerIn: parent
+                spacing: 1
+                Text { Layout.alignment: Qt.AlignHCenter; text: root.isPlaying ? "⏸" : "▶"; color: "#fff"; font.pixelSize: 10 }
+                Text { Layout.alignment: Qt.AlignHCenter; text: "Alt+Space"; color: Qt.rgba(1, 1, 1, 0.55); font.pixelSize: 7; font.family: "monospace" }
+              }
               MouseArea {
                 id: playMouseArea
                 anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                 hoverEnabled: true
                 onClicked: {
-                  quickCmdProc.command = ["/home/jeffy/.local/bin/milo-music", "play-pause"]
-                  quickCmdProc.running = true
-                  root.triggerShockwave()
-                  if (!mediaProc.running) mediaProc.running = true
+                  mediaCard.forceActiveFocus()
+                  root.musicPlayPause()
                 }
               }
             }
 
             Rectangle {
-              Layout.fillWidth: true; height: 26; radius: 5
+              Layout.fillWidth: true; height: 30; radius: 5
               color: nextMouseArea.containsMouse ? Qt.rgba(1, 0.03, 0.22, 0.35) : Qt.rgba(1, 0.03, 0.22, 0.15)
               border.color: Qt.rgba(1, 0.03, 0.22, 0.4); border.width: 1
-              Text { anchors.centerIn: parent; text: "⏭"; color: "#fff"; font.pixelSize: 11 }
+              ColumnLayout {
+                anchors.centerIn: parent
+                spacing: 1
+                Text { Layout.alignment: Qt.AlignHCenter; text: "⏭"; color: "#fff"; font.pixelSize: 10 }
+                Text { Layout.alignment: Qt.AlignHCenter; text: "Alt+→"; color: Qt.rgba(1, 1, 1, 0.45); font.pixelSize: 7; font.family: "monospace" }
+              }
               MouseArea {
                 id: nextMouseArea
                 anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                 hoverEnabled: true
                 onClicked: {
-                  quickCmdProc.command = ["/home/jeffy/.local/bin/milo-music", "next"]
-                  quickCmdProc.running = true
-                  root.triggerShockwave()
-                  if (!mediaProc.running) mediaProc.running = true
+                  mediaCard.forceActiveFocus()
+                  root.musicNext()
                 }
               }
             }

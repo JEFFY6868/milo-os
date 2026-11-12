@@ -656,6 +656,79 @@ def handle_calendar_intent(prompt: str) -> Optional[Tuple[str, str]]:
     return None
 
 
+def handle_music_intent(prompt: str) -> Optional[Tuple[str, str]]:
+    """Intercept natural language music control queries & actions to manipulate Milo Music."""
+    if prompt.startswith("You are Milo") or "system:" in prompt.lower() or len(prompt.split()) > 20:
+        return None
+
+    p = prompt.strip().lower()
+    music_bin = Path.home() / ".local" / "bin" / "milo-music"
+    if not music_bin.exists():
+        return None
+
+    # Play / Resume
+    if re.search(r'\b(?:play\s+(?:music|song|soundtrack|audio)|resume\s+(?:music|song|soundtrack|playback)|start\s+music)\b', p) or p in ["play", "play music", "music play"]:
+        try:
+            res = subprocess.run([str(music_bin), "status"], capture_output=True, text=True, timeout=3)
+            out = res.stdout.strip()
+            if ":::Paused" in out or ":::Stopped" in out or not out:
+                subprocess.run([str(music_bin), "play-pause"], check=False)
+            return "Playing Milo Cyber Soundtrack.", "Milo Cyber Soundtrack"
+        except Exception:
+            return None
+
+    # Pause / Stop
+    if re.search(r'\b(?:pause\s+(?:music|song|soundtrack|playback)|stop\s+(?:music|song|soundtrack|playing))\b', p) or p in ["pause", "pause music", "stop music"]:
+        try:
+            subprocess.run([str(music_bin), "play-pause"], check=False)
+            return "Milo Soundtrack paused.", "Milo Cyber Soundtrack"
+        except Exception:
+            return None
+
+    # Next / Skip
+    if re.search(r'\b(?:next\s+(?:song|track|music)|skip\s+(?:this\s+)?(?:song|track)|play\s+next)\b', p) or p in ["next", "skip", "next song", "next track"]:
+        try:
+            subprocess.run([str(music_bin), "next"], check=False)
+            time.sleep(0.3)
+            res = subprocess.run([str(music_bin), "status"], capture_output=True, text=True, timeout=3)
+            out = res.stdout.strip()
+            if ":::" in out:
+                parts = out.split(":::")
+                return f"Skipped. Now playing {parts[0]} by {parts[1]}.", "Milo Cyber Soundtrack"
+            return "Skipped to next track.", "Milo Cyber Soundtrack"
+        except Exception:
+            return None
+
+    # Previous track
+    if re.search(r'\b(?:previous\s+(?:song|track|music)|prev\s+(?:song|track)|play\s+previous|go\s+back\s+(?:a\s+)?song)\b', p) or p in ["prev", "previous", "previous song"]:
+        try:
+            subprocess.run([str(music_bin), "prev"], check=False)
+            time.sleep(0.3)
+            res = subprocess.run([str(music_bin), "status"], capture_output=True, text=True, timeout=3)
+            out = res.stdout.strip()
+            if ":::" in out:
+                parts = out.split(":::")
+                return f"Playing previous track: {parts[0]} by {parts[1]}.", "Milo Cyber Soundtrack"
+            return "Playing previous track.", "Milo Cyber Soundtrack"
+        except Exception:
+            return None
+
+    # What song is playing / status
+    if re.search(r'\b(?:what(?:\'?s|\s+is)\s+(?:this\s+)?(?:song|music|track|playing)|what\s+(?:song|music|track)\s+is\s+(?:this\s+|currently\s+)?playing|what\s+am\s+i\s+listening\s+to|current\s+(?:song|track|music)|music\s+status)\b', p):
+        try:
+            res = subprocess.run([str(music_bin), "status"], capture_output=True, text=True, timeout=3)
+            out = res.stdout.strip()
+            if ":::" in out:
+                parts = out.split(":::")
+                st_word = "Playing" if parts[2] == "Playing" else "Paused"
+                return f"{st_word}: '{parts[0]}' by {parts[1]}.", "Milo Cyber Soundtrack"
+            return "No soundtrack is currently loaded.", "Milo Cyber Soundtrack"
+        except Exception:
+            return None
+
+    return None
+
+
 def handle_camera_intent(prompt: str) -> Optional[Tuple[str, str]]:
     """Intercept conversational requests to inspect user or physical surroundings via webcam."""
     if prompt.startswith("You are Milo") or "system:" in prompt.lower() or len(prompt.split()) > 30:
@@ -724,6 +797,11 @@ def execute_hybrid_query(prompt: str) -> Tuple[str, str]:
     cal_res = handle_calendar_intent(prompt)
     if cal_res:
         return cal_res
+
+    # 0.2 Check music-specific intent
+    music_res = handle_music_intent(prompt)
+    if music_res:
+        return music_res
 
     # 1. Check optical vision intent
     cam_res = handle_camera_intent(prompt)
