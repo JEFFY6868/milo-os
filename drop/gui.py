@@ -347,8 +347,8 @@ class MiloDropWindow(QMainWindow):
         title_box = QVBoxLayout()
         title = QLabel("MILO DROP")
         title.setObjectName("headerTitle")
-        subtitle = QLabel(f"AIRDROP & LOCAL NETWORK TRANSFER // WI-FI: {self.wifi_ssid.upper()}")
-        subtitle.setStyleSheet("color: #7a6e73; font-size: 10px; font-weight: 700; letter-spacing: 1px;")
+        subtitle = QLabel("AIRDROP & LOCAL P2P FILE SHARING")
+        subtitle.setStyleSheet("color: #8c8286; font-size: 10px; font-weight: 700; letter-spacing: 1px;")
         title_box.addWidget(title)
         title_box.addWidget(subtitle)
         header_layout.addLayout(title_box)
@@ -404,63 +404,43 @@ class MiloDropWindow(QMainWindow):
         # Left Column: QR Code Card
         qr_card = QFrame()
         qr_card.setObjectName("cardFrame")
-        qr_card.setFixedWidth(340)
+        qr_card.setFixedWidth(330)
         qr_layout = QVBoxLayout(qr_card)
-        qr_layout.setContentsMargins(14, 14, 14, 14)
-        qr_layout.setSpacing(10)
+        qr_layout.setContentsMargins(16, 16, 16, 16)
+        qr_layout.setSpacing(12)
+        qr_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         qr_title = QLabel("CONNECT ANY PHONE")
-        qr_title.setStyleSheet("color: #ff0838; font-size: 13px; font-weight: 800; letter-spacing: 1px;")
+        qr_title.setStyleSheet("color: #ff0838; font-size: 14px; font-weight: 800; letter-spacing: 1.5px;")
         qr_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         qr_layout.addWidget(qr_title)
 
-        qr_hint = QLabel("Scan with iPhone or Android camera.\nInstant file upload with ZERO app install!")
-        qr_hint.setStyleSheet("color: #9a8c92; font-size: 10px; line-height: 1.4;")
+        qr_hint = QLabel("Open Camera on iPhone or Android.\nInstant file upload with ZERO app install!")
+        qr_hint.setStyleSheet("color: #9a8c92; font-size: 11px; line-height: 1.4;")
         qr_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         qr_layout.addWidget(qr_hint)
 
-        # Dedicated QR container
-        qr_container = QWidget()
-        qc_layout = QVBoxLayout(qr_container)
-        qc_layout.setContentsMargins(0, 4, 0, 4)
-        qc_layout.setSpacing(10)
-        qc_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
+        # QR Image
         self.qr_label = QLabel()
-        self.qr_label.setFixedSize(176, 176)
+        self.qr_label.setFixedSize(180, 180)
         self.qr_label.setStyleSheet("border: 2px solid #ff0838; border-radius: 12px; background: #ffffff; padding: 2px;")
         self.qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.load_qr_image()
-        qc_layout.addWidget(self.qr_label, alignment=Qt.AlignmentFlag.AlignCenter)
+        qr_layout.addWidget(self.qr_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.url_display = QLabel(self.server_url)
-        self.url_display.setFixedHeight(28)
-        self.url_display.setStyleSheet("color: #00f0ff; font-size: 11px; font-weight: 700; background: rgba(0,240,255,0.08); padding: 4px 12px; border-radius: 6px; border: 1px solid rgba(0,240,255,0.25);")
+        self.url_display.setFixedHeight(30)
+        self.url_display.setStyleSheet("color: #00f0ff; font-size: 11px; font-weight: 700; background: rgba(0,240,255,0.08); padding: 5px 14px; border-radius: 6px; border: 1px solid rgba(0,240,255,0.25);")
         self.url_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        qc_layout.addWidget(self.url_display, alignment=Qt.AlignmentFlag.AlignCenter)
+        qr_layout.addWidget(self.url_display, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        qr_layout.addWidget(qr_container)
-
-        # Quick Steps
-        steps_box = QFrame()
-        steps_box.setStyleSheet("background: rgba(0,0,0,0.35); border-radius: 8px; padding: 8px;")
-        sb_layout = QVBoxLayout(steps_box)
-        sb_layout.setSpacing(5)
-        
-        step1 = QLabel("1. Point camera at QR code")
-        step1.setStyleSheet("color: #d1c8cb; font-size: 10px; font-weight: 600;")
-        step2 = QLabel("2. Tap banner to open Milo Drop")
-        step2.setStyleSheet("color: #d1c8cb; font-size: 10px; font-weight: 600;")
-        step3 = QLabel("3. Select photos/files to drop")
-        step3.setStyleSheet("color: #d1c8cb; font-size: 10px; font-weight: 600;")
-        sb_layout.addWidget(step1)
-        sb_layout.addWidget(step2)
-        sb_layout.addWidget(step3)
-        qr_layout.addWidget(steps_box)
-
-        qr_layout.addStretch()
+        self.wifi_note = QLabel(f"📶 Wi-Fi: {self.wifi_ssid}")
+        self.wifi_note.setStyleSheet("color: #d1c8cb; font-size: 11px; font-weight: 600;")
+        self.wifi_note.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        qr_layout.addWidget(self.wifi_note)
 
         btn_refresh_ip = QPushButton("🔄 RE-CHECK WI-FI IP")
+        btn_refresh_ip.setFixedHeight(30)
         btn_refresh_ip.clicked.connect(self.refresh_network_ip)
         qr_layout.addWidget(btn_refresh_ip)
 
@@ -470,11 +450,12 @@ class MiloDropWindow(QMainWindow):
         recent_card = QFrame()
         recent_card.setObjectName("cardFrame")
         recent_layout = QVBoxLayout(recent_card)
+        recent_layout.setContentsMargins(16, 14, 16, 14)
         recent_layout.setSpacing(10)
 
         top_row = QHBoxLayout()
-        recent_title = QLabel("📥 RECENT RECEIVED FILES (~/Downloads)")
-        recent_title.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: 700;")
+        recent_title = QLabel("📥 RECEIVED FILES")
+        recent_title.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: 800; letter-spacing: 0.5px;")
         top_row.addWidget(recent_title)
         top_row.addStretch()
 
@@ -813,6 +794,8 @@ class MiloDropWindow(QMainWindow):
 
                 lbl_name = QLabel(e.name)
                 lbl_name.setStyleSheet("color: #ffffff; font-size: 12px; font-weight: 700;")
+                lbl_name.setMaximumWidth(270)
+                lbl_name.setToolTip(e.name)
                 
                 lbl_meta = QLabel(f"{sz_str}  •  {mtime_str}")
                 lbl_meta.setStyleSheet("color: #8c8286; font-size: 10px;")
