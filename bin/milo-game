@@ -1,20 +1,26 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Milo Game Mode Supervisor
-# Evicts resident AI models from GPU VRAM and dedicates 100% GPU to gaming.
+# Milo Game Mode Supervisor — Dynamic GPU VRAM Governor & AI Restorer
+# Part of MiloOS. Built for Arch Linux, Hyprland & NVIDIA Optimus.
 # ==============================================================================
-set -e
+set -eo pipefail
 
-STATE_DIR="$HOME/.config/milo"
-STATE_FILE="$STATE_DIR/gamemode.state"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+
+STATE_DIR="${HOME}/.config/milo"
+STATE_FILE="${STATE_DIR}/gamemode.state"
 JSON_FILE="/tmp/milo-gamemode.json"
-mkdir -p "$STATE_DIR"
+mkdir -p "${STATE_DIR}"
+
+CORTEX_SOCK="${XDG_RUNTIME_DIR}/milo-cortex.sock"
+VOICE_SOCK="${XDG_RUNTIME_DIR}/milo-voice.sock"
 
 notify() {
     local title="$1"
     local msg="$2"
     if command -v notify-send >/dev/null 2>&1; then
-        notify-send -a "Milo OS" -i "input-gaming" "$title" "$msg" 2>/dev/null || true
+        notify-send -a "Milo Game Mode" -i "input-gaming" "$title" "$msg" 2>/dev/null || true
     fi
 }
 
@@ -26,17 +32,39 @@ get_used_vram() {
     nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null || echo "Unknown"
 }
 
+probe_socket() {
+    local sock="$1"
+    [ -S "$sock" ] || return 1
+    python3 -c "
+import socket, json, sys
+try:
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(1.5)
+    s.connect('$sock')
+    s.sendall(json.dumps({'action': 'ping'}).encode('utf-8') + b'\n')
+    resp = json.loads(s.recv(1024).decode())
+    sys.exit(0 if resp.get('status') == 'pong' else 1)
+except Exception:
+    sys.exit(1)
+" >/dev/null 2>&1
+}
+
 sync_hud_state() {
     local is_active="$1"
+    local cortex_st="${2:-unknown}"
+    local voice_st="${3:-unknown}"
     local free_vram
     free_vram=$(get_free_vram)
     local used_vram
     used_vram=$(get_used_vram)
+    
     cat <<EOF > "$JSON_FILE.tmp"
 {
   "active": $is_active,
   "vram_used": "${used_vram} MiB",
   "vram_free": "${free_vram} MiB",
+  "cortex": "$cortex_st",
+  "voice": "$voice_st",
   "timestamp": $(date +%s)
 }
 EOF
@@ -44,7 +72,7 @@ EOF
 }
 
 game_on() {
-    echo -e "\033[1;36m🎮 [Milo Game Mode] Activating Gaming Profile...\033[0m"
+    echo -e "\033[1;36m🎮 [Milo Game Mode] Engaging 100% VRAM Dedication Profile...\033[0m"
 
     # 1. Stop Milo Resident AI Daemons
     echo "  • Unloading Milo Voice Daemon (Kokoro-82M)..."
@@ -54,10 +82,18 @@ game_on() {
     systemctl --user stop milo-cortex.service 2>/dev/null || true
 
     # Clean any lingering python model processes on GPU if any
-    pkill -f "${HOME}/.local/share/milo/voice/daemon.py" 2>/dev/null || true
-    pkill -f "${HOME}/.local/share/milo/cortex/daemon.py" 2>/dev/null || true
+    pkill -f "milo/voice/daemon.py" 2>/dev/null || true
+    pkill -f "milo/cortex/daemon.py" 2>/dev/null || true
 
-    sleep 1
+    # Wait up to 5s for GPU memory release
+    for ((i=1; i<=5; i++)); do
+        local used
+        used=$(get_used_vram)
+        if [[ "$used" =~ ^[0-9]+$ ]] && [ "$used" -lt 500 ]; then
+            break
+        fi
+        sleep 0.8
+    done
 
     # 2. Record state
     date +%s > "$STATE_FILE"
@@ -67,40 +103,78 @@ game_on() {
     free_vram=$(get_free_vram)
     local used_vram
     used_vram=$(get_used_vram)
-    sync_hud_state true
+    sync_hud_state true "offline" "offline"
 
     echo -e "\033[1;32m✔ [Milo Game Mode] ACTIVE!\033[0m"
     echo -e "  • VRAM Used: \033[1;33m${used_vram} MiB\033[0m / 3072 MiB"
     echo -e "  • VRAM Free: \033[1;32m${free_vram} MiB\033[0m dedicated to games"
-    echo -e "  • AI Daemons: \033[1;30mSuspended (0% CPU, 0% GPU)\033[0m"
+    echo -e "  • AI Daemons: \033[1;30mSuspended (0% GPU VRAM, 0% CPU)\033[0m"
 
-    notify "🎮 Game Mode Active" "VRAM freed: ${free_vram} MiB available for gaming."
-    milo-sound shield 2>/dev/null || true
+    notify "🎮 Game Mode Active" "100% VRAM dedicated to gaming (${free_vram} MiB free)."
+    "${HOME}/.local/bin/milo-sound" shield 2>/dev/null || true
 }
 
 game_off() {
-    echo -e "\033[1;36m⚡ [Milo Game Mode] Deactivating Gaming Profile...\033[0m"
+    echo -e "\033[1;36m⚡ [Milo Game Mode] Deactivating Gaming Profile & Restoring AI Stack...\033[0m"
 
     rm -f "$STATE_FILE"
 
-    echo "  • Restoring Milo Cortex Daemon (Qwen2.5)..."
+    # Stage 1: Restore Cortex first (Qwen2.5 GGUF)
+    echo -n "  • Restoring Milo Cortex Daemon (Qwen2.5)... "
     systemctl --user start milo-cortex.service 2>/dev/null || true
+    local cortex_ready=false
+    for ((i=1; i<=15; i++)); do
+        if probe_socket "$CORTEX_SOCK"; then
+            cortex_ready=true
+            echo -e "\033[1;32mONLINE\033[0m (${i}s)"
+            break
+        fi
+        sleep 1
+    done
+    if [ "$cortex_ready" = false ]; then
+        echo -e "\033[1;31mTIMEOUT (15s)\033[0m"
+    fi
 
-    echo "  • Restoring Milo Voice Daemon (Kokoro-82M)..."
+    # Stage 2: Restore Voice (Kokoro-82M TTS & CUDA warmup)
+    echo -n "  • Restoring Milo Voice Daemon (Kokoro-82M)... "
     systemctl --user start milo-voice.service 2>/dev/null || true
-
-    sleep 2
+    local voice_ready=false
+    for ((i=1; i<=30; i++)); do
+        if probe_socket "$VOICE_SOCK"; then
+            voice_ready=true
+            echo -e "\033[1;32mONLINE\033[0m (${i}s)"
+            break
+        fi
+        sleep 1
+    done
+    if [ "$voice_ready" = false ]; then
+        echo -e "\033[1;31mTIMEOUT (30s)\033[0m"
+    fi
 
     local used_vram
     used_vram=$(get_used_vram)
-    sync_hud_state false
+    local free_vram
+    free_vram=$(get_free_vram)
+    
+    local c_label="online"
+    [ "$cortex_ready" = false ] && c_label="error"
+    local v_label="online"
+    [ "$voice_ready" = false ] && v_label="error"
+    sync_hud_state false "$c_label" "$v_label"
 
-    echo -e "\033[1;32m✔ [Milo Game Mode] Normal Profile Restored.\033[0m"
-    echo -e "  • Resident VRAM: ${used_vram} MiB / 3072 MiB"
-    echo -e "  • Milo Voice & Cortex: \033[1;32mWarm & Online\033[0m"
-
-    notify "⚡ Milo AI Restored" "Voice and Cortex daemons back online."
-    milo-sound sweep 2>/dev/null || true
+    if [ "$cortex_ready" = true ] && [ "$voice_ready" = true ]; then
+        echo -e "\n\033[1;32m✔ [Milo Game Mode] Normal Profile Restored & Verified!\033[0m"
+        echo -e "  • Resident VRAM: \033[1;33m${used_vram} MiB used\033[0m / \033[1;32m${free_vram} MiB free\033[0m"
+        echo -e "  • Cortex LLM:    \033[1;32m✔ Warm & Ready\033[0m ($CORTEX_SOCK)"
+        echo -e "  • Kokoro Voice:  \033[1;32m✔ Warm & Ready\033[0m ($VOICE_SOCK)"
+        notify "⚡ Milo AI Fully Restored" "Kokoro Voice & Cortex LLM verified resident in VRAM (${used_vram} MiB)."
+        "${HOME}/.local/bin/milo-sound" sweep 2>/dev/null || true
+    else
+        echo -e "\n\033[1;33m⚠ [Milo Game Mode] Restoration partial/degraded:\033[0m"
+        echo -e "  • Cortex Ready: $cortex_ready"
+        echo -e "  • Voice Ready:  $voice_ready"
+        notify "⚠ Milo AI Warning" "Cortex: $cortex_ready | Voice: $voice_ready"
+    fi
 }
 
 status() {
@@ -113,11 +187,10 @@ status() {
     free_vram=$(get_free_vram)
     local used_vram
     used_vram=$(get_used_vram)
-    sync_hud_state "$is_active"
 
     if [ "$is_active" = true ]; then
         echo -e "\033[1;32m● Milo Game Mode: ACTIVE\033[0m"
-        echo -e "  • Profile: \033[1;33mPure Gaming (AI Daemons Off)\033[0m"
+        echo -e "  • Profile: \033[1;33mPure Gaming (AI Daemons Suspended)\033[0m"
     else
         echo -e "\033[1;34m● Milo Game Mode: INACTIVE (Normal AI Mode)\033[0m"
         echo -e "  • Profile: \033[1;32mAI Resident Warm\033[0m"
@@ -125,11 +198,59 @@ status() {
     echo -e "  • GPU Memory: \033[1;33m${used_vram} MiB used\033[0m / \033[1;32m${free_vram} MiB free\033[0m"
 }
 
+health() {
+    echo -e "\033[1;36m╔═══════════════════════════════════════════════════════════════════╗\033[0m"
+    echo -e "\033[1;36m║\033[0m  \033[1;37m✦ MILO HARDWARE & AI DAEMON HEALTH PROBE\033[0m                      \033[1;36m║\033[0m"
+    echo -e "\033[1;36m╚═══════════════════════════════════════════════════════════════════╝\033[0m"
+    
+    local gm_active=false
+    [ -f "$STATE_FILE" ] && gm_active=true
+
+    local used_vram
+    used_vram=$(get_used_vram)
+    local free_vram
+    free_vram=$(get_free_vram)
+
+    echo -e "  • \033[1;34mGame Mode:\033[0m          $([ "$gm_active" = true ] && echo -e "\033[1;32mACTIVE (Gaming Profile)\033[0m" || echo -e "\033[1;34mINACTIVE (Normal AI Mode)\033[0m")"
+    echo -e "  • \033[1;34mGPU VRAM:\033[0m           \033[1;33m${used_vram} MiB used\033[0m / \033[1;32m${free_vram} MiB free\033[0m"
+
+    if [ "$gm_active" = true ]; then
+        echo -e "\n  \033[1;33m⚡ In Game Mode: AI daemons are intentionally suspended.\033[0m\n"
+        return
+    fi
+
+    echo -e "\n  \033[1;37mResident AI Socket Probes:\033[0m"
+
+    # Probe Cortex
+    if probe_socket "$CORTEX_SOCK"; then
+        echo -e "  • Cortex LLM (Qwen2.5):     \033[1;32m✔ ONLINE & RESPONSIVE\033[0m ($CORTEX_SOCK)"
+    else
+        local c_status
+        c_status=$(systemctl --user is-active milo-cortex.service 2>/dev/null || echo "unknown")
+        echo -e "  • Cortex LLM (Qwen2.5):     \033[1;31m✘ UNREACHABLE\033[0m (service: $c_status)"
+    fi
+
+    # Probe Voice
+    if probe_socket "$VOICE_SOCK"; then
+        echo -e "  • Voice TTS (Kokoro-82M):   \033[1;32m✔ ONLINE & RESPONSIVE\033[0m ($VOICE_SOCK)"
+    else
+        local v_status
+        v_status=$(systemctl --user is-active milo-voice.service 2>/dev/null || echo "unknown")
+        echo -e "  • Voice TTS (Kokoro-82M):   \033[1;31m✘ UNREACHABLE\033[0m (service: $v_status)"
+    fi
+
+    # Sentinel governor
+    local s_status
+    s_status=$(systemctl --user is-active milo-sentinel.service 2>/dev/null || echo "unknown")
+    echo -e "  • Sentinel VRAM Governor:   $([ "$s_status" = "active" ] && echo -e "\033[1;32m✔ ACTIVE (Auto-Game Detection)\033[0m" || echo -e "\033[1;31m✘ $s_status\033[0m")"
+    echo
+}
+
 ACTION="${1:-toggle}"
 
 case "$ACTION" in
     --help|-h|help)
-        echo "Usage: milo-game {on|off|toggle|status|run <cmd>}"
+        echo "Usage: milo-game {on|off|toggle|status|check|health|run <cmd>}"
         exit 0
         ;;
     on|start|enable)
@@ -148,10 +269,13 @@ case "$ACTION" in
     status)
         status
         ;;
+    check|health|probe)
+        health
+        ;;
     run)
         shift
         if [ $# -eq 0 ]; then
-            echo "Usage: milo game run <command> [args...]"
+            echo "Usage: milo-game run <command> [args...]"
             exit 1
         fi
         game_on
@@ -161,7 +285,7 @@ case "$ACTION" in
         game_off
         ;;
     *)
-        echo "Usage: milo game {on|off|toggle|status|run <cmd>}"
+        echo "Usage: milo-game {on|off|toggle|status|check|health|run <cmd>}"
         exit 1
         ;;
 esac
