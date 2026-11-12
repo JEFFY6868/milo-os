@@ -1926,6 +1926,7 @@ Item {
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
                   root.midLeftTab = "tasks"
+                  deskTaskInput.forceActiveFocus()
                 }
               }
             }
@@ -1954,6 +1955,7 @@ Item {
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
                   root.midLeftTab = "agenda"
+                  deskAgendaInput.forceActiveFocus()
                 }
               }
             }
@@ -1961,7 +1963,7 @@ Item {
             // Mail Tab Button in HUD Header
             Rectangle {
               height: 20
-              width: hudMailLabel.implicitWidth + 8
+              width: hudMailLabel.implicitWidth + 10
               radius: 4
               color: root.midLeftTab === "mail" ? "#ffaa00" : (root.mailData && root.mailData.unread_count > 0 ? Qt.rgba(1.0, 0.67, 0.0, 0.25) : Qt.rgba(1, 1, 1, 0.08))
               border.color: root.midLeftTab === "mail" ? "#ffffff" : (root.mailData && root.mailData.unread_count > 0 ? "#ffaa00" : Qt.rgba(1, 1, 1, 0.2))
@@ -1970,7 +1972,7 @@ Item {
               Text {
                 id: hudMailLabel
                 anchors.centerIn: parent
-                text: root.mailData && root.mailData.unread_count > 0 ? ("✉ " + root.mailData.unread_count) : "✉"
+                text: root.mailData && root.mailData.unread_count > 0 ? ("✉ " + root.mailData.unread_count) : "✉ MAIL"
                 color: root.midLeftTab === "mail" ? "#060102" : (root.mailData && root.mailData.unread_count > 0 ? "#ffaa00" : Qt.rgba(1, 1, 1, 0.45))
                 font.pixelSize: 8
                 font.bold: true
@@ -1982,6 +1984,7 @@ Item {
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
                   root.midLeftTab = "mail"
+                  deskMailFocusScope.forceActiveFocus()
                 }
               }
             }
@@ -2575,8 +2578,14 @@ Item {
                     event.accepted = true
                     return
                   } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
-                    root.midLeftTab = "agenda"
-                    deskAgendaInput.forceActiveFocus()
+                    var isBack = (event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier))
+                    if (isBack) {
+                      root.midLeftTab = "mail"
+                      deskMailFocusScope.forceActiveFocus()
+                    } else {
+                      root.midLeftTab = "agenda"
+                      deskAgendaInput.forceActiveFocus()
+                    }
                     event.accepted = true
                     return
                   }
@@ -2645,7 +2654,14 @@ Item {
                     deskAgendaInput.focus = false
                     event.accepted = true
                   } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
-                    root.midLeftTab = "mail"
+                    var isBack = (event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier))
+                    if (isBack) {
+                      root.midLeftTab = "tasks"
+                      deskTaskInput.forceActiveFocus()
+                    } else {
+                      root.midLeftTab = "mail"
+                      deskMailFocusScope.forceActiveFocus()
+                    }
                     event.accepted = true
                   }
                 }
@@ -2671,15 +2687,41 @@ Item {
           }
 
           // ------------------------------------------------------------------
-          // INPUT 3: Quick Action Strip (visible when midLeftTab === "mail")
+          // INPUT 3: Quick Action Strip & Mail Focus Scope (visible when midLeftTab === "mail")
           // ------------------------------------------------------------------
           Rectangle {
+            id: deskMailFocusScope
             Layout.fillWidth: true
             height: 24; radius: 5
-            color: Qt.rgba(0.08, 0.05, 0.02, 0.85)
-            border.color: Qt.rgba(1.0, 0.67, 0.0, 0.4)
-            border.width: 1
+            color: activeFocus ? Qt.rgba(0.14, 0.09, 0.02, 0.95) : Qt.rgba(0.08, 0.05, 0.02, 0.85)
+            border.color: activeFocus ? "#ffaa00" : Qt.rgba(1.0, 0.67, 0.0, 0.4)
+            border.width: activeFocus ? 1.5 : 1
             visible: root.midLeftTab === "mail"
+            focus: root.midLeftTab === "mail"
+
+            Keys.priority: Keys.BeforeItem
+            Keys.onPressed: function(event) {
+              if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+                var isBack = (event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier))
+                if (isBack) {
+                  root.midLeftTab = "agenda"
+                  deskAgendaInput.forceActiveFocus()
+                } else {
+                  root.midLeftTab = "tasks"
+                  deskTaskInput.forceActiveFocus()
+                }
+                event.accepted = true
+              } else if (event.key === Qt.Key_Escape) {
+                deskMailFocusScope.focus = false
+                event.accepted = true
+              } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                root.mailSummarize()
+                event.accepted = true
+              } else if (event.key === Qt.Key_R && (event.modifiers & Qt.ControlModifier)) {
+                root.mailSync()
+                event.accepted = true
+              }
+            }
 
             RowLayout {
               anchors.fill: parent
@@ -4365,8 +4407,10 @@ Item {
         if (visible) {
           if (root.midLeftTab === "tasks") {
             modalTaskInput.forceActiveFocus()
-          } else {
+          } else if (root.midLeftTab === "agenda") {
             modalAgendaInput.forceActiveFocus()
+          } else {
+            modalMailFocusScope.forceActiveFocus()
           }
         }
       }
@@ -4393,14 +4437,31 @@ Item {
             root.scratchpadModalOpen = false
             event.accepted = true
           } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+            var isBack = (event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier))
             if (root.midLeftTab === "tasks") {
-              root.midLeftTab = "agenda"
-              modalAgendaInput.forceActiveFocus()
+              if (isBack) {
+                root.midLeftTab = "mail"
+                modalMailFocusScope.forceActiveFocus()
+              } else {
+                root.midLeftTab = "agenda"
+                modalAgendaInput.forceActiveFocus()
+              }
             } else if (root.midLeftTab === "agenda") {
-              root.midLeftTab = "mail"
-            } else {
-              root.midLeftTab = "tasks"
-              modalTaskInput.forceActiveFocus()
+              if (isBack) {
+                root.midLeftTab = "tasks"
+                modalTaskInput.forceActiveFocus()
+              } else {
+                root.midLeftTab = "mail"
+                modalMailFocusScope.forceActiveFocus()
+              }
+            } else { // "mail"
+              if (isBack) {
+                root.midLeftTab = "agenda"
+                modalAgendaInput.forceActiveFocus()
+              } else {
+                root.midLeftTab = "tasks"
+                modalTaskInput.forceActiveFocus()
+              }
             }
             event.accepted = true
           }
@@ -4455,6 +4516,7 @@ Item {
                   cursorShape: Qt.PointingHandCursor
                   onClicked: {
                     root.midLeftTab = "tasks"
+                    modalTaskInput.forceActiveFocus()
                   }
                 }
               }
@@ -4480,6 +4542,7 @@ Item {
                   cursorShape: Qt.PointingHandCursor
                   onClicked: {
                     root.midLeftTab = "agenda"
+                    modalAgendaInput.forceActiveFocus()
                   }
                 }
               }
@@ -4527,6 +4590,7 @@ Item {
                   cursorShape: Qt.PointingHandCursor
                   onClicked: {
                     root.midLeftTab = "mail"
+                    modalMailFocusScope.forceActiveFocus()
                   }
                 }
               }
@@ -4903,8 +4967,14 @@ Item {
                     event.accepted = true
                     return
                   } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
-                    root.midLeftTab = "agenda"
-                    modalAgendaInput.forceActiveFocus()
+                    var isBack = (event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier))
+                    if (isBack) {
+                      root.midLeftTab = "mail"
+                      modalMailFocusScope.forceActiveFocus()
+                    } else {
+                      root.midLeftTab = "agenda"
+                      modalAgendaInput.forceActiveFocus()
+                    }
                     event.accepted = true
                     return
                   }
@@ -5470,7 +5540,14 @@ Item {
                     root.scratchpadModalOpen = false
                     event.accepted = true
                   } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
-                    root.midLeftTab = "mail"
+                    var isBack = (event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier))
+                    if (isBack) {
+                      root.midLeftTab = "tasks"
+                      modalTaskInput.forceActiveFocus()
+                    } else {
+                      root.midLeftTab = "mail"
+                      modalMailFocusScope.forceActiveFocus()
+                    }
                     event.accepted = true
                   }
                 }
@@ -5892,15 +5969,41 @@ Item {
             }
           }
 
-          // 3. Milo AI Mail Copilot Strip
+          // 3. Milo AI Mail Copilot Strip & Modal Mail Focus Scope
           Rectangle {
+            id: modalMailFocusScope
             Layout.fillWidth: true
             height: 68
             radius: 8
-            color: Qt.rgba(0.08, 0.05, 0.02, 0.75)
-            border.color: Qt.rgba(1.0, 0.67, 0.0, 0.35)
-            border.width: 1
+            color: activeFocus ? Qt.rgba(0.14, 0.09, 0.02, 0.95) : Qt.rgba(0.08, 0.05, 0.02, 0.75)
+            border.color: activeFocus ? "#ffaa00" : Qt.rgba(1.0, 0.67, 0.0, 0.35)
+            border.width: activeFocus ? 1.5 : 1
             visible: root.midLeftTab === "mail"
+            focus: root.midLeftTab === "mail"
+
+            Keys.priority: Keys.BeforeItem
+            Keys.onPressed: function(event) {
+              if (event.key === Qt.Key_Escape) {
+                root.scratchpadModalOpen = false
+                event.accepted = true
+              } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+                var isBack = (event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier))
+                if (isBack) {
+                  root.midLeftTab = "agenda"
+                  modalAgendaInput.forceActiveFocus()
+                } else {
+                  root.midLeftTab = "tasks"
+                  modalTaskInput.forceActiveFocus()
+                }
+                event.accepted = true
+              } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                root.mailSummarize()
+                event.accepted = true
+              } else if (event.key === Qt.Key_R && (event.modifiers & Qt.ControlModifier)) {
+                root.mailSync()
+                event.accepted = true
+              }
+            }
 
             ColumnLayout {
               anchors.fill: parent
