@@ -249,9 +249,11 @@ def check_anthropic_sentinel(client, mark_alerted=True):
     """
     Direct server-side IMAP search for incoming priority dispatches from Anthropic or Claude.
     Triggers critical voice & visual HUD alerts when new emails arrive.
+    Voice and visual notifications are strictly consolidated and rate-limited.
     """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     alerted_file = DATA_DIR / "alerted_anthropic.json"
+    rate_limit_file = DATA_DIR / ".anthropic_voice_ratelimit"
     alerted_ids = set()
     if alerted_file.exists():
         try:
@@ -289,6 +291,12 @@ def check_anthropic_sentinel(client, mark_alerted=True):
                 continue
 
             msg = email.message_from_bytes(raw_email)
+            message_id = msg.get("Message-ID", mid_str).strip()
+            if message_id in alerted_ids:
+                if mark_alerted:
+                    alerted_ids.add(mid_str)
+                continue
+
             subject = decode_mime_words(msg.get("Subject", "(No Subject)"))
             sender = decode_mime_words(msg.get("From", "Anthropic"))
             date_raw = msg.get("Date", "")
@@ -298,6 +306,7 @@ def check_anthropic_sentinel(client, mark_alerted=True):
 
             item = {
                 "id": mid_str,
+                "msg_id": message_id,
                 "from": sender,
                 "subject": subject,
                 "date": date_raw,
@@ -308,6 +317,8 @@ def check_anthropic_sentinel(client, mark_alerted=True):
             new_matches.append(item)
             if mark_alerted:
                 alerted_ids.add(mid_str)
+                if message_id:
+                    alerted_ids.add(message_id)
         except Exception:
             continue
 
@@ -318,39 +329,64 @@ def check_anthropic_sentinel(client, mark_alerted=True):
         except Exception:
             pass
 
-        for match in new_matches:
-            sender = match.get("from", "Anthropic")
-            subj = match.get("subject", "Claude Update")
+        # 1. Play Alert Sound ONCE (Never in a loop)
+        try:
+            sound_bin = Path.home() / ".local" / "bin" / "milo-sound"
+            if sound_bin.exists():
+                subprocess.run([str(sound_bin), "alert"], timeout=2)
+        except Exception:
+            pass
 
-            # 1. Play Alert Sound
-            try:
-                sound_bin = Path.home() / ".local" / "bin" / "milo-sound"
-                if sound_bin.exists():
-                    subprocess.run([str(sound_bin), "alert"], timeout=2)
-            except Exception:
-                pass
+        # 2. Consolidated Desktop Notification (Single notification, never spammed)
+        try:
+            if len(new_matches) == 1:
+                m = new_matches[0]
+                notif_title = "🚨 ANTHROPIC / CLAUDE DISPATCH"
+                notif_body = f"{m.get('subject')}\nFrom: {m.get('from')}"
+            else:
+                notif_title = f"🚨 ANTHROPIC DISPATCH ({len(new_matches)} New)"
+                notif_body = f"Received {len(new_matches)} priority emails from Anthropic / Claude.\nLatest: {new_matches[-1].get('subject')}"
 
-            # 2. Critical Desktop Notification
-            try:
-                subprocess.run([
-                    "notify-send",
-                    "-u", "critical",
-                    "-a", "Milo Sentinel",
-                    "-i", "mail-unread",
-                    "🚨 ANTHROPIC / CLAUDE DISPATCH",
-                    f"{subj}\nFrom: {sender}"
-                ], timeout=3)
-            except Exception:
-                pass
+            subprocess.run([
+                "notify-send",
+                "-u", "critical",
+                "-a", "Milo Sentinel",
+                "-i", "mail-unread",
+                notif_title,
+                notif_body
+            ], timeout=3)
+        except Exception:
+            pass
 
-            # 3. Voice Announcement
-            try:
+        # 3. Voice Announcement (EXACTLY ONCE, STRICTLY RATE-LIMITED)
+        try:
+            now_ts = time.time()
+            last_spoken = 0.0
+            if rate_limit_file.exists():
+                try:
+                    last_spoken = float(rate_limit_file.read_text().strip())
+                except Exception:
+                    last_spoken = 0.0
+
+            # Minimum 120s interval between voice dispatches to prevent any possible repetition
+            if (now_ts - last_spoken) >= 120.0:
                 speak_bin = Path.home() / ".local" / "bin" / "milo-speak"
                 if speak_bin.exists():
-                    voice_msg = f"Jeffy, priority dispatch: you have received an email from Anthropic regarding Claude!"
+                    if len(new_matches) == 1:
+                        subj_clean = new_matches[0].get("subject", "Claude Update").strip()
+                        if len(subj_clean) > 50:
+                            subj_clean = subj_clean[:47] + "..."
+                        voice_msg = f"Jeffy, priority dispatch: you have received an email from Anthropic regarding {subj_clean}."
+                    else:
+                        voice_msg = f"Jeffy, priority dispatch: you have received {len(new_matches)} new emails from Anthropic or Claude."
+
                     subprocess.run([str(speak_bin), voice_msg], timeout=5)
-            except Exception:
-                pass
+                    try:
+                        rate_limit_file.write_text(str(now_ts))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
     return new_matches
 
