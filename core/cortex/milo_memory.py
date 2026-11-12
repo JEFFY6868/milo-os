@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
-VAULT_DIR = Path.home() / "Documents" / "Obsidian" / "Milo"
+VAULT_DIR = Path.home() / "MiloNotes"
 MEMORIES_DIR = VAULT_DIR / "Memories"
 DAILY_DIR = VAULT_DIR / "Daily"
 CORE_MEMORIES_FILE = MEMORIES_DIR / "Core_Memories.md"

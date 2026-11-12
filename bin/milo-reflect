@@ -14,9 +14,9 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Set
 
-# Obsidian Vault Paths
+# Milo Vault Paths
 HOME = Path.home()
-VAULT_DIR = HOME / "Documents" / "Obsidian" / "Milo"
+VAULT_DIR = HOME / "MiloNotes"
 DAILY_DIR = VAULT_DIR / "Daily"
 MEMORIES_DIR = VAULT_DIR / "Memories"
 PROFILE_DIR = VAULT_DIR / "Profile"
