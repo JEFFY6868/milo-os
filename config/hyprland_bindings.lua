@@ -4,6 +4,7 @@
 -- Milo Desktop Assistant & Spotlight (Milo Tactical HUD)
 hl.unbind("SUPER + SPACE")
 o.bind("SUPER + SPACE", "Milo Tactical HUD", "/home/jeffy/.local/bin/milo-hud")
+hl.unbind("SUPER + SHIFT + SPACE")
 o.bind("SUPER + SHIFT + SPACE", "Milo Clipboard AI", "milo-clipboard")
 o.bind("SUPER + SLASH", "Milo Semantic Brain", "/home/jeffy/.local/bin/milo-brain")
 o.bind("SUPER + ALT + B", "Milo Semantic Brain", "/home/jeffy/.local/bin/milo-brain")
@@ -32,6 +33,7 @@ o.bind("SUPER + SHIFT + W", "Milo WhatsApp Gateway", "foot -T 'Milo WhatsApp Gat
 
 -- Google DeepMind Antigravity AI Agent (with live log watcher for Milo Guardian)
 o.bind("SUPER + G", "Antigravity AI", "foot -T 'Antigravity AI' -e /home/jeffy/.local/bin/agy")
+hl.unbind("SUPER + ALT + G")
 o.bind("SUPER + ALT + G", "Milo Game Mode Toggle", "/home/jeffy/.local/bin/milo-game toggle")
 
 -- Screenshot, Snipping Tool, OCR & Color Picker
@@ -83,6 +85,7 @@ o.bind("SUPER + ALT + J", "Milo Voice AI Chat", { tui = "/home/jeffy/.local/bin/
 o.bind("SUPER + SHIFT + V", "Celluloid Video Player", "celluloid")
 o.bind("SUPER + M", "Milo Music Player", { tui = "milo-music" })
 o.bind("SUPER + ALT + M", "Milo Music Track Picker", { launch = "foot -a milo-floating -T 'MILO // Track Picker' /home/jeffy/.local/bin/milo-music pick" })
+hl.unbind("SUPER + ALT + SPACE")
 o.bind("SUPER + ALT + SPACE", "Milo Music Play/Pause", "/home/jeffy/.local/bin/milo-music play-pause")
 o.bind("SUPER + ALT + P", "Milo Music Play/Pause", "/home/jeffy/.local/bin/milo-music play-pause")
 o.bind("SUPER + ALT + RIGHT", "Milo Music Next Track", "/home/jeffy/.local/bin/milo-music next")

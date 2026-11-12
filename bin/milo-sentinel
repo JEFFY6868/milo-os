@@ -83,7 +83,8 @@ def detect_running_game():
     # 2. Check process table for known game binaries
     for binary in GAME_BINARIES:
         try:
-            res = subprocess.run(["pgrep", "-f", binary], capture_output=True, text=True, timeout=1)
+            # Match exact binary process name (-x) to avoid false positives on command line parameters
+            res = subprocess.run(["pgrep", "-x", binary], capture_output=True, text=True, timeout=1)
             if res.returncode == 0 and res.stdout.strip():
                 # Verify it's not our own sentinel script
                 pids = res.stdout.strip().split()
