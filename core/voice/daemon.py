@@ -284,8 +284,15 @@ def main():
     if SOCKET_PATH.exists():
         SOCKET_PATH.unlink()
 
+    # Restrict the IPC socket to the owner (0600) before binding.
+    os.umask(0o077)
+
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     server.bind(str(SOCKET_PATH))
+    try:
+        os.chmod(SOCKET_PATH, 0o600)
+    except OSError:
+        pass
     server.listen(10)
     print(f"[VoiceDaemon] Listening on {SOCKET_PATH}")
 

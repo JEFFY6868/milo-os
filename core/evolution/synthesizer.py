@@ -89,6 +89,12 @@ class MiloSynthesizer:
 
             meta_block = meta_match.group(1)
             target_path = meta_match.group(2).strip()
+            # Security: the model must never choose a write path outside ~/.local/bin.
+            allowed_bin = Path.home() / ".local" / "bin"
+            resolved_target = Path(target_path).expanduser().resolve()
+            if allowed_bin not in resolved_target.parents:
+                resolved_target = allowed_bin / f"milo-wish-{int(time.time())}"
+            target_path = str(resolved_target)
             script_content = script_match.group(1).strip()
 
             meta = {}
@@ -100,7 +106,9 @@ class MiloSynthesizer:
             title = meta.get("TITLE", f"Milo Tool: {wish_text[:30]}")
             category = meta.get("CATEGORY", "automation")
             spoken = meta.get("SPOKEN", f"Jeffy, I engineered a new tool for {wish_text[:40]}. Ready for your authorization.")
-            verify = meta.get("VERIFY", f"{target_path} || true")
+            verify = meta.get("VERIFY", f"{target_path} --help")
+            if any(ch in verify for ch in ";|&`$><\n"):
+                verify = f"{target_path} --help"
 
             proposal_id = f"evo-wish-{int(time.time())}"
             hud = (
@@ -168,7 +176,7 @@ class MiloSynthesizer:
                         "content": f"#!/usr/bin/env bash\nsystemctl --user reset-failed {unit}\nsystemctl --user restart {unit}\n"
                     }
                 ],
-                "verification_command": f"systemctl --user is-active --quiet {unit} || [ $(systemctl --user is-failed {unit}) != 'failed' ]",
+                "verification_command": f"systemctl --user is-active --quiet {unit}",
                 "created_at": time.time()
             }
 

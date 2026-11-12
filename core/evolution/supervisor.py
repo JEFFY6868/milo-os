@@ -11,6 +11,9 @@ import json
 import time
 import socket
 import shutil
+import fcntl
+import shlex
+import tempfile
 import subprocess
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -26,11 +29,25 @@ class MiloSupervisor:
         self.runtime_dir = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
         self.ensure_ledger()
 
+    @staticmethod
+    def _atomic_write_json(path: Path, data: Dict[str, Any]) -> None:
+        """Write JSON via mkstemp + fsync + os.replace so a crash cannot truncate it."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, path)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+
     def ensure_ledger(self):
         EVOLUTION_DIR.mkdir(parents=True, exist_ok=True)
         if not LEDGER_FILE.exists():
-            with open(LEDGER_FILE, "w") as f:
-                json.dump({"evolutions": []}, f, indent=2)
+            self._atomic_write_json(LEDGER_FILE, {"evolutions": []})
 
     def speak(self, text: str):
         """Sends spoken text to Kokoro voice daemon."""
@@ -81,18 +98,42 @@ class MiloSupervisor:
         created_files = []
 
         try:
+            # Step 0: Validate the verification command BEFORE any file is touched.
+            verify_cmd = proposal.get("verification_command", "true")
+            if not isinstance(verify_cmd, str) or not verify_cmd.strip():
+                raise ValueError("Empty or invalid verification command")
+            if any(ch in verify_cmd for ch in ";|&`$><\n"):
+                raise ValueError(f"Verification command contains shell metacharacters: {verify_cmd!r}")
+            verify_argv = shlex.split(verify_cmd)
+            allowed_verify = {"bash", "sh", "python3", "systemctl", "true", "test"}
+            if not verify_argv or Path(verify_argv[0]).name not in allowed_verify:
+                raise ValueError(f"Verification binary not allowlisted: {verify_argv[:1]}")
+
             # Step 1: Pre-flight & Backups
             actions = proposal.get("actions", [])
             for action in actions:
                 act_type = action.get("action")
                 path_str = action.get("path")
-                target_path = Path(path_str)
 
                 if act_type in ("create_script", "write_file", "modify_file"):
+                    if not path_str:
+                        raise ValueError("Proposal action is missing a 'path'")
+                    raw_target = Path(path_str)
+                    if raw_target.is_symlink():
+                        raise ValueError(f"Refusing to write through symlink: {raw_target}")
+                    target_path = raw_target.resolve()
+                    allowed_roots = (
+                        Path.home() / ".local" / "bin",
+                        Path.home() / ".local" / "share" / "milo",
+                    )
+                    if not any(target_path == root or root in target_path.parents for root in allowed_roots):
+                        raise ValueError(f"Refusing write outside allowlist: {target_path}")
+
                     if target_path.exists():
-                        backup_path = target_path.with_suffix(f"{target_path.suffix}.bak_evo")
-                        if not backup_path.exists():
-                            shutil.copy2(target_path, backup_path)
+                        backup_path = target_path.with_name(
+                            f"{target_path.name}.bak_evo.{int(time.time() * 1000)}"
+                        )
+                        shutil.copy2(target_path, backup_path)
                         backups.append((target_path, backup_path))
                     else:
                         created_files.append(target_path)
@@ -129,10 +170,9 @@ class MiloSupervisor:
                             raise ValueError(f"Pre-flight bash syntax check failed on {target_path}: {res.stderr.decode()}")
 
             # Step 2: Verification Assertion Check
-            verify_cmd = proposal.get("verification_command", "true")
-            print(f"🔍 [Milo Evolution] Running verification assertion: {verify_cmd}...")
+            print(f"🔍 [Milo Evolution] Running verification assertion: {verify_argv}...")
             t0 = time.time()
-            res = subprocess.run(verify_cmd, shell=True, capture_output=True, text=True, timeout=10)
+            res = subprocess.run(verify_argv, capture_output=True, text=True, timeout=10)
 
             if res.returncode != 0:
                 raise RuntimeError(f"Verification command failed with code {res.returncode}: {res.stderr}")
@@ -195,12 +235,6 @@ class MiloSupervisor:
 
     def record_success(self, proposal: Dict[str, Any]):
         """Records completed evolution to the persistent ledger and Obsidian."""
-        try:
-            with open(LEDGER_FILE, "r") as f:
-                data = json.load(f)
-        except Exception:
-            data = {"evolutions": []}
-
         record = {
             "id": proposal["id"],
             "title": proposal["title"],
@@ -208,10 +242,20 @@ class MiloSupervisor:
             "applied_at": time.time(),
             "date": time.strftime("%Y-%m-%d %H:%M:%S")
         }
-        data["evolutions"].append(record)
 
-        with open(LEDGER_FILE, "w") as f:
-            json.dump(data, f, indent=2)
+        EVOLUTION_DIR.mkdir(parents=True, exist_ok=True)
+        lock_path = EVOLUTION_DIR / ".ledger.lock"
+        with open(lock_path, "w") as lock_f:
+            fcntl.flock(lock_f, fcntl.LOCK_EX)
+            try:
+                try:
+                    data = json.loads(LEDGER_FILE.read_text(encoding="utf-8"))
+                except Exception:
+                    data = {"evolutions": []}
+                data.setdefault("evolutions", []).append(record)
+                self._atomic_write_json(LEDGER_FILE, data)
+            finally:
+                fcntl.flock(lock_f, fcntl.LOCK_UN)
 
         # Update Obsidian Reflection if directory exists
         if OBSIDIAN_REFLECTIONS.exists():

@@ -310,8 +310,28 @@ def query_cortex_daemon(prompt: str, max_tokens: int = 180) -> Optional[str]:
 
 
 def _deadline(fn, timeout: float):
-    """Enforce strict deadline using a daemon thread, bypassing ThreadPoolExecutor shutdown wait."""
+    """Enforce a hard wall-clock deadline.
+
+    On the main thread use SIGALRM so the in-flight socket call is interrupted
+    instead of leaking a worker thread. Fall back to a daemon thread elsewhere.
+    """
+    import signal
     import threading
+
+    if threading.current_thread() is threading.main_thread():
+        def _on_alarm(_signum, _frame):
+            raise TimeoutError(f"deadline exceeded ({timeout}s)")
+
+        previous = signal.signal(signal.SIGALRM, _on_alarm)
+        signal.setitimer(signal.ITIMER_REAL, timeout)
+        try:
+            return fn()
+        except TimeoutError:
+            return None
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous)
+
     box = []
     t = threading.Thread(target=lambda: box.append(fn()), daemon=True)
     t.start()
@@ -890,9 +910,9 @@ def handle_pkg_intent(prompt: str) -> Optional[Tuple[str, str]]:
 
     p_lower = prompt.lower().strip()
 
-    is_install = any(k in p_lower for k in [
-        "install ", "installing ", "reinstall ", "download and install"
-    ]) or bool(re.search(r'^(?:milo\s+)?install\b', p_lower))
+    is_install = bool(re.match(
+        r'^(?:milo\s+)?(?:install|reinstall|download\s+and\s+install)\b', p_lower
+    )) or bool(re.search(r'\b(?:please|can\s+you|could\s+you)\s+install\b', p_lower))
 
     is_remove = any(k in p_lower for k in [
         "uninstall ", "remove package", "delete package"
@@ -960,6 +980,10 @@ def handle_pkg_intent(prompt: str) -> Optional[Tuple[str, str]]:
         return None
 
     target = target.strip("'\"`.,!? ")
+
+    # Safety: never hand arbitrary sentence text to the package manager.
+    if not re.fullmatch(r'[a-z0-9][a-z0-9@._+-]{0,63}', target):
+        return None
 
     try:
         title = f"MILO // {'Install' if action == 'install' else 'Remove'} {target}"

@@ -148,7 +148,10 @@ def main():
 
         cleaned_lower = text.lower().strip()
         # Voice Directive Interceptor for Milo Evolution Protocol
-        if any(kw in cleaned_lower for kw in ["authorize upgrade", "apply evolution", "authorize evolution", "apply upgrade", "milo authorize", "milo apply"]):
+        negated = any(neg in cleaned_lower for neg in (
+            "don't", "do not", "dont", "never", "cancel", "stop", "not apply", "no apply"
+        ))
+        if not negated and any(kw in cleaned_lower for kw in ["authorize upgrade", "apply evolution", "authorize evolution", "apply upgrade", "milo authorize", "milo apply"]):
             notify("✦ Milo Evolution", "Voice Authorization Confirmed. Applying upgrade...", timeout=2500)
             subprocess.run([str(Path.home() / ".local/bin/milo-evolve"), "approve"], check=False)
             return

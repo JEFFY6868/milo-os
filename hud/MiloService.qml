@@ -771,9 +771,9 @@ Item {
     }
   }
 
-  // 3. Network & Satellite Uplink Polling (Low-frequency 15s interval)
+  // 3. Network & Satellite Uplink Polling (Low-frequency 60s interval)
   Timer {
-    interval: 15000
+    interval: 60000
     running: true
     repeat: true
     triggeredOnStart: true

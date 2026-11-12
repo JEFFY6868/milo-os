@@ -249,22 +249,27 @@ print('Proposal deferred.')
     test-rollback)
         echo -e "\033[1;33m⚠️ [Milo Evolution] Running Rollback Safety Net Simulation...\033[0m"
         "$PYTHON_BIN" -c "
+from pathlib import Path
 from supervisor import MiloSupervisor
+test_script = str(Path.home() / '.local/bin/.milo_test_buggy_script.sh')
 dummy_fail_prop = {
     'id': 'sim-failure-test',
     'title': 'Deliberate Intentional Bug Simulation',
     'actions': [
         {
             'action': 'create_script',
-            'path': '/tmp/milo_test_buggy_script.sh',
+            'path': test_script,
             'executable': True,
             'content': '#!/bin/bash\nexit 42\n'
         }
     ],
-    'verification_command': '/tmp/milo_test_buggy_script.sh'
+    'verification_command': f'bash {test_script}'
 }
 sup = MiloSupervisor()
-sup.apply_proposal(dummy_fail_prop)
+try:
+    sup.apply_proposal(dummy_fail_prop)
+except RuntimeError:
+    print('✔ Rollback simulation confirmed: failure caught and rolled back successfully!')
 "
         ;;
 
