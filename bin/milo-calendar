@@ -1,0 +1,483 @@
+#!/usr/bin/env python3
+"""
+Milo Sovereign Local Calendar & Agenda Engine
+Part of MiloOS. Built for Arch Linux, Hyprland & Tactical Trinity HUD.
+Zero cloud dependencies. Instant SQLite storage.
+"""
+
+import os
+import sys
+import json
+import time
+import sqlite3
+import argparse
+import subprocess
+import re
+from datetime import datetime, date, timedelta
+from pathlib import Path
+
+# Paths
+BASE_DIR = Path.home() / ".local" / "share" / "milo" / "calendar"
+DB_PATH = BASE_DIR / "calendar.db"
+AGENDA_CACHE = BASE_DIR / "agenda_today.json"
+TRIGGER_PATH = Path("/tmp/milo-scratchpad-trigger")
+
+# Colors for Terminal / Tactical Trinity
+CYAN = "\033[1;36m"
+CRIMSON = "\033[1;31m"
+GREEN = "\033[1;32m"
+YELLOW = "\033[1;33m"
+DIM = "\033[2m"
+RESET = "\033[0m"
+
+CATEGORY_COLORS = {
+    "work": "#ff0838",      # Crimson
+    "focus": "#00f0ff",     # Cyan
+    "meeting": "#ffaa00",   # Amber
+    "personal": "#a855f7",  # Purple
+    "health": "#00ff88",    # Emerald
+}
+
+def get_db():
+    BASE_DIR.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    with conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                event_date TEXT NOT NULL,
+                event_time TEXT NOT NULL,
+                duration_min INTEGER DEFAULT 60,
+                category TEXT DEFAULT 'work',
+                color TEXT DEFAULT '#ff0838',
+                description TEXT DEFAULT '',
+                reminded INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_date ON events(event_date)")
+    return conn
+
+def sync_cache():
+    """Writes today's agenda JSON for the Wallpaper HUD and signals QML."""
+    today_str = date.today().isoformat()
+    conn = get_db()
+    with conn:
+        rows = conn.execute("""
+            SELECT id, title, event_date, event_time, duration_min, category, color, description
+            FROM events
+            WHERE event_date = ?
+            ORDER BY event_time ASC
+        """, (today_str,)).fetchall()
+        
+    events = [dict(r) for r in rows]
+    
+    # Calculate time remaining / status
+    now = datetime.now()
+    for ev in events:
+        try:
+            ev_dt = datetime.strptime(f"{ev['event_date']} {ev['event_time']}", "%Y-%m-%d %H:%M")
+            end_dt = ev_dt + timedelta(minutes=ev.get("duration_min", 60))
+            if now < ev_dt:
+                diff = int((ev_dt - now).total_seconds() / 60)
+                if diff >= 60:
+                    ev["status_text"] = f"in {diff // 60}h {diff % 60}m"
+                else:
+                    ev["status_text"] = f"in {diff}m"
+                ev["is_active"] = False
+                ev["is_past"] = False
+            elif now <= end_dt:
+                ev["status_text"] = "ACTIVE NOW"
+                ev["is_active"] = True
+                ev["is_past"] = False
+            else:
+                ev["status_text"] = "COMPLETED"
+                ev["is_active"] = False
+                ev["is_past"] = True
+        except Exception:
+            ev["status_text"] = ""
+            ev["is_active"] = False
+            ev["is_past"] = False
+
+    BASE_DIR.mkdir(parents=True, exist_ok=True)
+    AGENDA_CACHE.write_text(json.dumps(events, indent=2) + "\n", encoding="utf-8")
+    
+    # Ping HUD trigger
+    try:
+        TRIGGER_PATH.write_text(f"{int(time.time()*1000)} update_agenda\n")
+    except Exception:
+        pass
+        
+    return events
+
+def parse_time(time_str: str) -> str:
+    """Normalizes time string into HH:MM (24-hour)."""
+    t = time_str.strip().upper()
+    formats = ["%H:%M", "%I:%M %p", "%I:%M%p", "%I %p", "%I%p"]
+    for fmt in formats:
+        try:
+            parsed = datetime.strptime(t, fmt)
+            return parsed.strftime("%H:%M")
+        except ValueError:
+            pass
+    # If just digits, e.g. "14" or "9"
+    if t.isdigit():
+        val = int(t)
+        if 0 <= val <= 23:
+            return f"{val:02d}:00"
+    raise ValueError(f"Could not parse time format: '{time_str}'. Expected formats like '14:30', '2pm', '09:00 AM'.")
+
+def parse_date(date_str: str) -> str:
+    """Normalizes date string into YYYY-MM-DD."""
+    d = date_str.strip().lower()
+    today = date.today()
+    if d in ["today", "td"]:
+        return today.isoformat()
+    if d in ["tomorrow", "tm", "tom"]:
+        return (today + timedelta(days=1)).isoformat()
+    # Check weekday names
+    weekdays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    for i, w in enumerate(weekdays):
+        if d.startswith(w[:3]):
+            days_ahead = (i - today.weekday() + 7) % 7
+            if days_ahead == 0:
+                days_ahead = 7
+            return (today + timedelta(days=days_ahead)).isoformat()
+    formats = ["%Y-%m-%d", "%d-%m-%Y", "%m/%d/%Y", "%d/%m/%Y"]
+    for fmt in formats:
+        try:
+            parsed = datetime.strptime(d, fmt)
+            return parsed.date().isoformat()
+        except ValueError:
+            pass
+    raise ValueError(f"Could not parse date format: '{date_str}'. Expected 'today', 'tomorrow', 'monday', or 'YYYY-MM-DD'.")
+
+def cmd_add(args):
+    try:
+        norm_date = parse_date(args.date) if args.date else date.today().isoformat()
+        norm_time = parse_time(args.time)
+    except Exception as e:
+        print(f"{CRIMSON}[ERROR]{RESET} {e}")
+        sys.exit(1)
+
+    cat = (args.category or "work").lower()
+    color = args.color or CATEGORY_COLORS.get(cat, "#ff0838")
+    
+    conn = get_db()
+    with conn:
+        cur = conn.execute("""
+            INSERT INTO events (title, event_date, event_time, duration_min, category, color, description)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (args.title, norm_date, norm_time, args.duration, cat, color, args.desc or ""))
+        event_id = cur.lastrowid
+        
+    sync_cache()
+    
+    time_fmt = datetime.strptime(norm_time, "%H:%M").strftime("%I:%M %p")
+    print(f"{GREEN}✓ Event Scheduled [ID: {event_id}]{RESET}")
+    print(f"  {CYAN}Title:{RESET}    {args.title}")
+    print(f"  {CYAN}Date:{RESET}     {norm_date}")
+    print(f"  {CYAN}Time:{RESET}     {time_fmt} ({args.duration}m)")
+    print(f"  {CYAN}Category:{RESET} {cat.upper()}")
+
+def cmd_quick(args):
+    text = args.text.strip()
+    m = re.search(r'\b(\d{1,2}(?::\d{2})?\s*(?:am|pm)|\d{1,2}:\d{2})\b', text, re.I)
+    if m:
+        t_str = m.group(1)
+        raw_title = (text[:m.start()] + text[m.end():]).replace('@', '').strip()
+        raw_title = re.sub(r'^(at|for)\s+|\s+(at|for)$', '', raw_title, flags=re.I).strip()
+        title = raw_title or "Quick Event"
+        try:
+            norm_time = parse_time(t_str)
+        except Exception:
+            norm_time = "12:00"
+    else:
+        now = datetime.now()
+        next_hour = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+        norm_time = next_hour.strftime("%H:%M")
+        title = text
+
+    norm_date = parse_date(args.date) if args.date else date.today().isoformat()
+    cat = (args.category or "work").lower()
+    color = args.color or CATEGORY_COLORS.get(cat, "#ff0838")
+    
+    conn = get_db()
+    with conn:
+        cur = conn.execute("""
+            INSERT INTO events (title, event_date, event_time, duration_min, category, color, description)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (title, norm_date, norm_time, args.duration, cat, color, args.desc or ""))
+        event_id = cur.lastrowid
+        
+    sync_cache()
+    time_fmt = datetime.strptime(norm_time, "%H:%M").strftime("%I:%M %p")
+    print(f"{GREEN}✓ Event Scheduled [ID: {event_id}]{RESET}: {title} @ {time_fmt}")
+
+def cmd_today(args):
+    events = sync_cache()
+    if args.json:
+        print(json.dumps(events, indent=2))
+        return
+        
+    print(f"{CRIMSON}╔═══════════════════════════════════════════════════════════════════╗{RESET}")
+    print(f"{CRIMSON}║{RESET}  {CYAN}✦ MILO SOVEREIGN AGENDA // TODAY ({date.today().strftime('%A, %b %d')}){RESET}  {CRIMSON}║{RESET}")
+    print(f"{CRIMSON}╚═══════════════════════════════════════════════════════════════════╝{RESET}")
+    
+    if not events:
+        print(f"  {DIM}No tactical events scheduled for today. Horizon is clear.{RESET}\n")
+        return
+        
+    for ev in events:
+        t_obj = datetime.strptime(ev["event_time"], "%H:%M")
+        t_display = t_obj.strftime("%I:%M %p")
+        status = ev.get("status_text", "")
+        if ev.get("is_active"):
+            status_tag = f"{GREEN}● {status}{RESET}"
+        elif ev.get("is_past"):
+            status_tag = f"{DIM}✔ {status}{RESET}"
+        else:
+            status_tag = f"{YELLOW}⏳ {status}{RESET}"
+            
+        print(f"  [{ev['id']}] {CYAN}{t_display}{RESET} ({ev['duration_min']}m)  {ev['title']}  ·  {status_tag}")
+        if ev.get("description"):
+            print(f"      {DIM}↳ {ev['description']}{RESET}")
+    print()
+
+def cmd_next(args):
+    now = datetime.now()
+    today_str = date.today().isoformat()
+    conn = get_db()
+    with conn:
+        rows = conn.execute("""
+            SELECT id, title, event_date, event_time, duration_min, category, color, description
+            FROM events
+            WHERE event_date >= ?
+            ORDER BY event_date ASC, event_time ASC
+        """, (today_str,)).fetchall()
+        
+    upcoming = None
+    for r in rows:
+        ev = dict(r)
+        ev_dt = datetime.strptime(f"{ev['event_date']} {ev['event_time']}", "%Y-%m-%d %H:%M")
+        end_dt = ev_dt + timedelta(minutes=ev.get("duration_min", 60))
+        if end_dt >= now:
+            upcoming = ev
+            upcoming["dt"] = ev_dt
+            break
+            
+    if not upcoming:
+        if args.json:
+            print(json.dumps(None))
+        else:
+            print("No upcoming events found.")
+        return
+
+    diff = int((upcoming["dt"] - now).total_seconds() / 60)
+    t_disp = upcoming["dt"].strftime("%I:%M %p")
+    d_disp = upcoming["dt"].strftime("%a, %b %d")
+    
+    if diff <= 0:
+        desc = "ACTIVE NOW"
+    elif diff < 60:
+        desc = f"Starts in {diff}m"
+    else:
+        desc = f"Starts in {diff // 60}h {diff % 60}m"
+        
+    upcoming["countdown"] = desc
+    upcoming.pop("dt", None)
+    
+    if args.json:
+        print(json.dumps(upcoming))
+    else:
+        print(f"⏳ [NEXT EVENT] {upcoming['title']} — {desc} ({d_disp} @ {t_disp})")
+
+def cmd_list(args):
+    conn = get_db()
+    today_str = date.today().isoformat()
+    days = args.days or 7
+    end_date = (date.today() + timedelta(days=days)).isoformat()
+    
+    with conn:
+        rows = conn.execute("""
+            SELECT id, title, event_date, event_time, duration_min, category, color, description
+            FROM events
+            WHERE event_date BETWEEN ? AND ?
+            ORDER BY event_date ASC, event_time ASC
+        """, (today_str, end_date)).fetchall()
+        
+    events = [dict(r) for r in rows]
+    if args.json:
+        print(json.dumps(events, indent=2))
+        return
+        
+    print(f"\n{CYAN}✦ MILO AGENDA // UPCOMING {days} DAYS{RESET}")
+    print(f"{DIM}─────────────────────────────────────────────────────────────{RESET}")
+    if not events:
+        print("  No upcoming events scheduled.\n")
+        return
+        
+    current_date = None
+    for ev in events:
+        if ev["event_date"] != current_date:
+            current_date = ev["event_date"]
+            d_obj = datetime.strptime(current_date, "%Y-%m-%d")
+            print(f"\n{CRIMSON}📅 {d_obj.strftime('%A, %B %d')}{RESET}")
+            
+        t_obj = datetime.strptime(ev["event_time"], "%H:%M")
+        print(f"   [{ev['id']}] {t_obj.strftime('%I:%M %p')}  {ev['title']} ({ev['duration_min']}m) · {DIM}{ev['category']}{RESET}")
+    print()
+
+def cmd_rm(args):
+    conn = get_db()
+    with conn:
+        cur = conn.execute("DELETE FROM events WHERE id = ?", (args.id,))
+        if cur.rowcount > 0:
+            print(f"{GREEN}✓ Event #{args.id} deleted successfully.{RESET}")
+        else:
+            print(f"{YELLOW}Event #{args.id} not found.{RESET}")
+    sync_cache()
+
+def cmd_briefing(args):
+    """Outputs natural language briefing suitable for milo-speak / Kokoro."""
+    today = date.today()
+    conn = get_db()
+    with conn:
+        rows = conn.execute("""
+            SELECT title, event_time, duration_min
+            FROM events
+            WHERE event_date = ?
+            ORDER BY event_time ASC
+        """, (today.isoformat(),)).fetchall()
+        
+    today_fmt = today.strftime("%A, %B %d")
+    if not rows:
+        print(f"Good morning, sir. Today is {today_fmt}. You have no events scheduled on your local calendar. Your schedule is completely open.")
+        return
+        
+    count = len(rows)
+    ev_word = "event" if count == 1 else "events"
+    events_spoken = []
+    for r in rows:
+        t_obj = datetime.strptime(r["event_time"], "%H:%M")
+        t_str = t_obj.strftime("%I:%M %p").lstrip("0")
+        events_spoken.append(f"{r['title']} at {t_str}")
+        
+    events_str = ", and ".join(events_spoken) if count <= 2 else ", ".join(events_spoken[:-1]) + f", and {events_spoken[-1]}"
+    print(f"Good morning, sir. Today is {today_fmt}. You have {count} {ev_word} scheduled: {events_str}.")
+
+def cmd_daemon(args):
+    """Background monitoring daemon for 5-minute event heads-up warnings."""
+    print(f"{CYAN}✦ Milo Calendar Daemon Online{RESET} — Monitoring upcoming events...")
+    while True:
+        try:
+            now = datetime.now()
+            today_str = date.today().isoformat()
+            conn = get_db()
+            with conn:
+                rows = conn.execute("""
+                    SELECT id, title, event_date, event_time, reminded
+                    FROM events
+                    WHERE event_date = ? AND reminded = 0
+                """, (today_str,)).fetchall()
+                
+                for r in rows:
+                    ev_dt = datetime.strptime(f"{r['event_date']} {r['event_time']}", "%Y-%m-%d %H:%M")
+                    diff_sec = (ev_dt - now).total_seconds()
+                    # Trigger alert between 4 and 6 minutes before start (5 min window)
+                    if 0 < diff_sec <= 330:
+                        title = r["title"]
+                        conn.execute("UPDATE events SET reminded = 1 WHERE id = ?", (r["id"],))
+                        print(f"🔔 ALERT: '{title}' starting in 5 minutes! Triggering speech & chime.")
+                        
+                        # Tactical sound
+                        sound_bin = Path.home() / ".local" / "bin" / "milo-sound"
+                        if sound_bin.exists():
+                            subprocess.run([str(sound_bin), "alert"], check=False)
+                            
+                        # Desktop notification
+                        subprocess.run([
+                            "notify-send", "-a", "Milo Calendar",
+                            f"✦ UPCOMING EVENT (5 MINS)",
+                            f"{title} begins at {ev_dt.strftime('%I:%M %p')}",
+                            "-i", "appointment-soon"
+                        ], check=False)
+                        
+                        # Spoken voice reminder
+                        speak_bin = Path.home() / ".local" / "bin" / "milo-speak"
+                        if speak_bin.exists():
+                            msg = f"Sir, {title} begins in five minutes."
+                            subprocess.Popen([str(speak_bin), msg])
+                            
+            sync_cache()
+        except Exception as e:
+            print(f"Daemon error: {e}")
+        time.sleep(30)
+
+def main():
+    parser = argparse.ArgumentParser(description="Milo Sovereign Local Calendar CLI")
+    subparsers = parser.add_subparsers(dest="command", help="Calendar subcommands")
+    
+    # today
+    p_today = subparsers.add_parser("today", help="Show today's events")
+    p_today.add_argument("--json", action="store_true", help="Output raw JSON")
+    
+    # next
+    p_next = subparsers.add_parser("next", help="Show the immediate next event")
+    p_next.add_argument("--json", action="store_true", help="Output raw JSON")
+    
+    # list
+    p_list = subparsers.add_parser("list", help="List upcoming events")
+    p_list.add_argument("--days", type=int, default=7, help="Number of days to list")
+    p_list.add_argument("--json", action="store_true", help="Output raw JSON")
+    
+    # add
+    p_add = subparsers.add_parser("add", help="Add a new event")
+    p_add.add_argument("title", help="Title of the event")
+    p_add.add_argument("time", help="Time (e.g. '14:00', '2:30 PM')")
+    p_add.add_argument("--date", help="Date (e.g. 'today', 'tomorrow', '2026-11-12')")
+    p_add.add_argument("--duration", type=int, default=60, help="Duration in minutes (default 60)")
+    p_add.add_argument("--category", default="work", choices=["work", "focus", "meeting", "personal", "health"])
+    p_add.add_argument("--color", help="Hex color code (e.g. '#ff0838')")
+    p_add.add_argument("--desc", help="Optional event description")
+    
+    # quick
+    p_quick = subparsers.add_parser("quick", help="Quick schedule from single string (e.g. '2pm Team Meeting')")
+    p_quick.add_argument("text", help="Text containing time and title")
+    p_quick.add_argument("--date", help="Date (default today)")
+    p_quick.add_argument("--duration", type=int, default=60, help="Duration in minutes (default 60)")
+    p_quick.add_argument("--category", default="work")
+    p_quick.add_argument("--color", help="Hex color code")
+    p_quick.add_argument("--desc", help="Optional description")
+
+    # rm
+    p_rm = subparsers.add_parser("rm", help="Remove an event by ID")
+    p_rm.add_argument("id", type=int, help="Event ID")
+    
+    # briefing
+    subparsers.add_parser("briefing", help="Emit spoken natural language briefing for milo-speak")
+    
+    # daemon
+    subparsers.add_parser("daemon", help="Run background reminder watcher")
+    
+    args = parser.parse_args()
+    if not args.command:
+        cmd_today(argparse.Namespace(json=False))
+        return
+        
+    cmds = {
+        "today": cmd_today,
+        "next": cmd_next,
+        "list": cmd_list,
+        "add": cmd_add,
+        "quick": cmd_quick,
+        "rm": cmd_rm,
+        "briefing": cmd_briefing,
+        "daemon": cmd_daemon,
+    }
+    cmds[args.command](args)
+
+if __name__ == "__main__":
+    main()

@@ -51,9 +51,36 @@ Item {
   property string intelligenceLabel: "🔄 AUTO (⚡ Cortex Offline)"
   property string intelligenceColor: "#ffaa00"
 
-  // Dynamic Persistent Milo Scratchpad
+  // Dynamic Persistent Milo Scratchpad & Calendar
   property bool scratchpadModalOpen: false
   property string scratchpadFilter: "all"  // "all" | "pending" | "completed"
+  property string midLeftTab: "tasks"      // "tasks" | "agenda"
+  property var agendaList: []
+
+  function reloadAgenda() {
+    try {
+      var raw = agendaFile.text().trim()
+      if (raw) {
+        var d = JSON.parse(raw)
+        if (Array.isArray(d)) root.agendaList = d
+      }
+    } catch(e) {}
+  }
+
+  function addAgendaQuick(text) {
+    if (!text || !text.trim()) return
+    if (quickCmdProc.running) quickCmdProc.running = false
+    quickCmdProc.command = [root.homeDir + "/.local/bin/milo-calendar", "quick", text.trim()]
+    quickCmdProc.running = true
+    root.playSound("chirp")
+  }
+
+  function removeAgendaEvent(id) {
+    if (quickCmdProc.running) quickCmdProc.running = false
+    quickCmdProc.command = [root.homeDir + "/.local/bin/milo-calendar", "rm", id.toString()]
+    quickCmdProc.running = true
+    root.playSound("chirp")
+  }
 
   // Milo Autonomous Evolution Protocol (MEP-1)
   property bool hasPendingEvolution: false
@@ -135,6 +162,22 @@ Item {
     }
   }
 
+  FileView {
+    id: agendaFile
+    path: root.homeDir + "/.local/share/milo/calendar/agenda_today.json"
+    watchChanges: true
+    printErrors: false
+    onLoaded: {
+      try {
+        var raw = text().trim()
+        if (raw) {
+          var data = JSON.parse(raw)
+          if (Array.isArray(data)) root.agendaList = data
+        }
+      } catch(e) {}
+    }
+  }
+
   // Milo Scratchpad Modal External IPC Trigger
   FileView {
     id: scratchpadTriggerWatcher
@@ -153,12 +196,17 @@ Item {
             root.scratchpadModalOpen = true
           } else if (act === "close") {
             root.scratchpadModalOpen = false
-          } else if (act === "update") {
+          } else if (act === "update" || act === "update_agenda") {
             // Trigger todos reload from disk
             var rawJson = todosFile.text().trim()
             if (rawJson) {
               var d = JSON.parse(rawJson)
               if (Array.isArray(d)) root.todosList = d
+            }
+            var rawAgenda = agendaFile.text().trim()
+            if (rawAgenda) {
+              var a = JSON.parse(rawAgenda)
+              if (Array.isArray(a)) root.agendaList = a
             }
           }
         }
@@ -1661,16 +1709,16 @@ Item {
       }
 
       // ----------------------------------------------------------------------
-      // 5.4 MID-LEFT: TACTICAL SCRATCHPAD & REMINDERS (Interactive Checklist)
+      // 5.4 MID-LEFT: TACTICAL SCRATCHPAD & CALENDAR (Tasks / Agenda Dual-Tab)
       // ----------------------------------------------------------------------
       Rectangle {
         id: scratchpadCard
         x: 35
         anchors.verticalCenter: parent.verticalCenter
-        width: 225; height: 225
+        width: 235; height: 245
         radius: 14
         color: Qt.rgba(0.06, 0.01, 0.02, 0.85)
-        border.color: Qt.rgba(1.0, 0.03, 0.22, 0.45)
+        border.color: root.midLeftTab === "agenda" ? Qt.rgba(0, 0.9, 1.0, 0.4) : Qt.rgba(1.0, 0.03, 0.22, 0.45)
         border.width: 1.2
 
         ColumnLayout {
@@ -1678,40 +1726,98 @@ Item {
           anchors.margins: 10
           spacing: 6
 
-          // Header
+          // Header: Dual-Tab Switcher & Stats
           RowLayout {
             Layout.fillWidth: true
-            RowLayout {
-              spacing: 6
+            spacing: 5
+
+            // Tasks Tab Button
+            Rectangle {
+              height: 20
+              width: tasksTabLabel.implicitWidth + 12
+              radius: 4
+              color: root.midLeftTab === "tasks" ? "#ff0838" : Qt.rgba(1, 0.03, 0.22, 0.15)
+              border.color: root.midLeftTab === "tasks" ? "#ffffff" : Qt.rgba(1, 0.03, 0.22, 0.4)
+              border.width: 1
+
               Text {
-                text: "✦ MILO SCRATCHPAD"
-                color: "#ff2a55"
-                font.pixelSize: 11
+                id: tasksTabLabel
+                anchors.centerIn: parent
+                text: "✦ TASKS"
+                color: root.midLeftTab === "tasks" ? "#ffffff" : "#ff8899"
+                font.pixelSize: 9
                 font.bold: true
                 font.family: "monospace"
               }
-              Text {
-                text: "⛶"
-                color: "#00f0ff"
-                font.pixelSize: 10
+
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                  root.midLeftTab = "tasks"
+                  root.playSound("chirp")
+                }
               }
+            }
+
+            // Agenda Tab Button
+            Rectangle {
+              height: 20
+              width: agendaTabLabel.implicitWidth + 12
+              radius: 4
+              color: root.midLeftTab === "agenda" ? "#00f0ff" : Qt.rgba(0, 0.9, 1.0, 0.15)
+              border.color: root.midLeftTab === "agenda" ? "#ffffff" : Qt.rgba(0, 0.9, 1.0, 0.4)
+              border.width: 1
+
+              Text {
+                id: agendaTabLabel
+                anchors.centerIn: parent
+                text: "📅 AGENDA"
+                color: root.midLeftTab === "agenda" ? "#060102" : "#80f5ff"
+                font.pixelSize: 9
+                font.bold: true
+                font.family: "monospace"
+              }
+
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                  root.midLeftTab = "agenda"
+                  root.playSound("chirp")
+                }
+              }
+            }
+
+            Item { Layout.fillWidth: true }
+
+            // Expand Modal Button
+            Text {
+              text: "⛶"
+              color: root.midLeftTab === "agenda" ? "#00f0ff" : "#ff2a55"
+              font.pixelSize: 11
               MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
                 onClicked: root.scratchpadModalOpen = true
               }
             }
-            Item { Layout.fillWidth: true }
+
+            // Badge / Counter
             Text {
               text: {
-                var doneCount = 0
-                for (var i = 0; i < root.todosList.length; i++) {
-                  if (root.todosList[i].done) doneCount++
+                if (root.midLeftTab === "tasks") {
+                  var doneCount = 0
+                  for (var i = 0; i < root.todosList.length; i++) {
+                    if (root.todosList[i].done) doneCount++
+                  }
+                  return doneCount + "/" + root.todosList.length + " DONE"
+                } else {
+                  return root.agendaList.length + " TODAY"
                 }
-                return doneCount + "/" + root.todosList.length + " DONE"
               }
-              color: Qt.rgba(1, 1, 1, 0.5)
-              font.pixelSize: 9
+              color: root.midLeftTab === "agenda" ? Qt.rgba(0, 0.9, 1.0, 0.7) : Qt.rgba(1, 1, 1, 0.5)
+              font.pixelSize: 8
               font.family: "monospace"
               MouseArea {
                 anchors.fill: parent
@@ -1721,11 +1827,14 @@ Item {
             }
           }
 
-          // Task items (scrollable)
+          // ------------------------------------------------------------------
+          // VIEW 1: TASK ITEMS LIST (visible when midLeftTab === "tasks")
+          // ------------------------------------------------------------------
           ScrollView {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
+            visible: root.midLeftTab === "tasks"
 
             ColumnLayout {
               width: scratchpadCard.width - 20
@@ -1801,13 +1910,124 @@ Item {
             }
           }
 
-          // Input field row
+          // ------------------------------------------------------------------
+          // VIEW 2: AGENDA ITEMS LIST (visible when midLeftTab === "agenda")
+          // ------------------------------------------------------------------
+          ScrollView {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            clip: true
+            visible: root.midLeftTab === "agenda"
+
+            ColumnLayout {
+              width: scratchpadCard.width - 20
+              spacing: 4
+
+              // Empty state
+              Item {
+                Layout.fillWidth: true
+                height: 48
+                visible: root.agendaList.length === 0
+                Text {
+                  anchors.centerIn: parent
+                  text: "No events today"
+                  color: Qt.rgba(1, 1, 1, 0.4)
+                  font.pixelSize: 9
+                  font.family: "monospace"
+                }
+              }
+
+              Repeater {
+                model: root.agendaList
+                delegate: Rectangle {
+                  id: agendaRow
+                  required property var modelData
+                  required property int index
+                  Layout.fillWidth: true
+                  height: 30
+                  radius: 5
+                  color: modelData.is_active ? Qt.rgba(0, 0.9, 1.0, 0.2) : Qt.rgba(0.06, 0.12, 0.16, 0.65)
+                  border.color: modelData.is_active ? "#00f0ff" : Qt.rgba(0, 0.8, 1.0, 0.22)
+                  border.width: 1
+
+                  RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 6
+                    anchors.rightMargin: 6
+                    spacing: 6
+
+                    // Time badge
+                    Rectangle {
+                      height: 18
+                      width: 40
+                      radius: 3
+                      color: Qt.rgba(0, 0, 0, 0.45)
+                      border.color: modelData.color || "#00f0ff"
+                      border.width: 1
+
+                      Text {
+                        anchors.centerIn: parent
+                        text: modelData.event_time || "--:--"
+                        color: modelData.color || "#00f0ff"
+                        font.pixelSize: 9
+                        font.bold: true
+                        font.family: "monospace"
+                      }
+                    }
+
+                    // Title & Status
+                    ColumnLayout {
+                      Layout.fillWidth: true
+                      spacing: 1
+
+                      Text {
+                        Layout.fillWidth: true
+                        text: modelData.title || ""
+                        color: "#ffffff"
+                        font.pixelSize: 10
+                        font.bold: true
+                        font.family: "system-ui, sans-serif"
+                        elide: Text.ElideRight
+                      }
+
+                      Text {
+                        Layout.fillWidth: true
+                        text: modelData.status_text || ""
+                        color: modelData.is_active ? "#00f0ff" : Qt.rgba(1, 1, 1, 0.45)
+                        font.pixelSize: 8
+                        font.family: "monospace"
+                        elide: Text.ElideRight
+                      }
+                    }
+
+                    // Delete button
+                    Text {
+                      text: "×"
+                      color: Qt.rgba(1, 0.3, 0.4, 0.7)
+                      font.pixelSize: 12
+                      font.bold: true
+                      MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.removeAgendaEvent(modelData.id)
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // ------------------------------------------------------------------
+          // INPUT 1: Add Task Row (visible when midLeftTab === "tasks")
+          // ------------------------------------------------------------------
           Rectangle {
             Layout.fillWidth: true
             height: 24; radius: 5
             color: Qt.rgba(0.12, 0.01, 0.03, 0.85)
             border.color: deskTaskInput.activeFocus ? "#ff0838" : Qt.rgba(1, 0.03, 0.22, 0.4)
             border.width: 1
+            visible: root.midLeftTab === "tasks"
 
             RowLayout {
               anchors.fill: parent
@@ -1840,6 +2060,54 @@ Item {
                   if (val.length > 0) {
                     root.addTodo(val)
                     deskTaskInput.text = ""
+                  }
+                }
+              }
+            }
+          }
+
+          // ------------------------------------------------------------------
+          // INPUT 2: Quick Add Agenda Row (visible when midLeftTab === "agenda")
+          // ------------------------------------------------------------------
+          Rectangle {
+            Layout.fillWidth: true
+            height: 24; radius: 5
+            color: Qt.rgba(0.04, 0.12, 0.16, 0.85)
+            border.color: deskAgendaInput.activeFocus ? "#00f0ff" : Qt.rgba(0, 0.8, 1.0, 0.4)
+            border.width: 1
+            visible: root.midLeftTab === "agenda"
+
+            RowLayout {
+              anchors.fill: parent
+              anchors.leftMargin: 6; anchors.rightMargin: 6
+              spacing: 6
+
+              Text { text: "📅"; font.pixelSize: 10 }
+
+              TextInput {
+                id: deskAgendaInput
+                Layout.fillWidth: true
+                color: "#ffffff"
+                font.pixelSize: 9
+                font.family: "system-ui, sans-serif"
+                clip: true
+                selectByMouse: true
+                selectionColor: "#00f0ff"
+
+                Text {
+                  anchors.fill: parent
+                  text: "+ 2pm Meeting & Enter..."
+                  color: Qt.rgba(1, 1, 1, 0.40)
+                  font.pixelSize: 9
+                  font.family: "system-ui, sans-serif"
+                  visible: !deskAgendaInput.text && !deskAgendaInput.activeFocus
+                }
+
+                onAccepted: {
+                  var val = deskAgendaInput.text.trim()
+                  if (val.length > 0) {
+                    root.addAgendaQuick(val)
+                    deskAgendaInput.text = ""
                   }
                 }
               }
@@ -3336,11 +3604,11 @@ Item {
         Rectangle {
           id: modalBox
           anchors.centerIn: parent
-          width: 580
-          height: 520
+          width: 620
+          height: 540
           radius: 14
           color: Qt.rgba(0.06, 0.01, 0.02, 0.96)
-          border.color: "#ff0838"
+          border.color: root.midLeftTab === "agenda" ? "#00f0ff" : "#ff0838"
           border.width: 1.5
 
         // Prevent click-through
@@ -3351,34 +3619,83 @@ Item {
           anchors.margins: 16
           spacing: 10
 
-          // Top Header Row
+          // Top Header Row: Dual Tab Switcher & Status
           RowLayout {
             Layout.fillWidth: true
             spacing: 8
 
-            Text {
-              text: "✦ MILO SCRATCHPAD // TACTICAL TASK MATRIX"
-              color: "#ff2a55"
-              font.pixelSize: 13
-              font.bold: true
-              font.family: "monospace"
+            // Tab Buttons
+            RowLayout {
+              spacing: 6
+
+              Rectangle {
+                height: 26
+                width: modalTasksTabLabel.implicitWidth + 16
+                radius: 5
+                color: root.midLeftTab === "tasks" ? "#ff0838" : Qt.rgba(1, 0.03, 0.22, 0.15)
+                border.color: root.midLeftTab === "tasks" ? "#ffffff" : Qt.rgba(1, 0.03, 0.22, 0.4)
+                border.width: 1
+                Text {
+                  id: modalTasksTabLabel
+                  anchors.centerIn: parent
+                  text: "✦ MISSIONS & TASKS"
+                  color: root.midLeftTab === "tasks" ? "#ffffff" : "#ff8899"
+                  font.pixelSize: 11
+                  font.bold: true
+                  font.family: "monospace"
+                }
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: {
+                    root.midLeftTab = "tasks"
+                    root.playSound("chirp")
+                  }
+                }
+              }
+
+              Rectangle {
+                height: 26
+                width: modalAgendaTabLabel.implicitWidth + 16
+                radius: 5
+                color: root.midLeftTab === "agenda" ? "#00f0ff" : Qt.rgba(0, 0.9, 1.0, 0.15)
+                border.color: root.midLeftTab === "agenda" ? "#ffffff" : Qt.rgba(0, 0.9, 1.0, 0.4)
+                border.width: 1
+                Text {
+                  id: modalAgendaTabLabel
+                  anchors.centerIn: parent
+                  text: "📅 CALENDAR & AGENDA"
+                  color: root.midLeftTab === "agenda" ? "#060102" : "#80f5ff"
+                  font.pixelSize: 11
+                  font.bold: true
+                  font.family: "monospace"
+                }
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: {
+                    root.midLeftTab = "agenda"
+                    root.playSound("chirp")
+                  }
+                }
+              }
             }
 
             Item { Layout.fillWidth: true }
 
             // Counters badge
             Rectangle {
-              height: 22
+              height: 24
               width: counterText.implicitWidth + 16
               radius: 5
-              color: Qt.rgba(1, 0.03, 0.22, 0.2)
-              border.color: Qt.rgba(1, 0.03, 0.22, 0.5)
+              color: root.midLeftTab === "agenda" ? Qt.rgba(0, 0.9, 1.0, 0.2) : Qt.rgba(1, 0.03, 0.22, 0.2)
+              border.color: root.midLeftTab === "agenda" ? Qt.rgba(0, 0.9, 1.0, 0.5) : Qt.rgba(1, 0.03, 0.22, 0.5)
               border.width: 1
               Text {
                 id: counterText
                 anchors.centerIn: parent
-                text: root.countDoneTodos() + "/" + root.todosList.length + " COMPLETED"
-                color: "#ff8899"
+                text: root.midLeftTab === "agenda" ? (root.agendaList.length + " EVENTS TODAY") : (root.countDoneTodos() + "/" + root.todosList.length + " COMPLETED")
+                color: root.midLeftTab === "agenda" ? "#80f5ff" : "#ff8899"
                 font.pixelSize: 10
                 font.bold: true
                 font.family: "monospace"
@@ -3388,8 +3705,8 @@ Item {
             // Close button
             Rectangle {
               width: 24; height: 24; radius: 5
-              color: Qt.rgba(1, 0.03, 0.22, 0.2)
-              border.color: "#ff0838"
+              color: root.midLeftTab === "agenda" ? Qt.rgba(0, 0.9, 1.0, 0.2) : Qt.rgba(1, 0.03, 0.22, 0.2)
+              border.color: root.midLeftTab === "agenda" ? "#00f0ff" : "#ff0838"
               border.width: 1
               Text {
                 anchors.centerIn: parent
@@ -3406,10 +3723,14 @@ Item {
             }
           }
 
+          // ==================================================================
+          // MODAL VIEW 1: TASKS
+          // ==================================================================
           // Filter tabs row: [ ALL (X) ] [ PENDING (Y) ] [ COMPLETED (Z) ]
           RowLayout {
             Layout.fillWidth: true
             spacing: 8
+            visible: root.midLeftTab === "tasks"
 
             Repeater {
               model: [
@@ -3489,6 +3810,7 @@ Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
+            visible: root.midLeftTab === "tasks"
 
             ColumnLayout {
               width: modalBox.width - 36
@@ -3601,6 +3923,7 @@ Item {
             color: Qt.rgba(0.12, 0.01, 0.03, 0.90)
             border.color: modalTaskInput.activeFocus ? "#ff0838" : Qt.rgba(1, 0.03, 0.22, 0.5)
             border.width: 1.2
+            visible: root.midLeftTab === "tasks"
 
             RowLayout {
               anchors.fill: parent
@@ -3672,6 +3995,7 @@ Item {
             color: Qt.rgba(0.04, 0.08, 0.12, 0.75)
             border.color: Qt.rgba(0, 0.9, 1.0, 0.35)
             border.width: 1
+            visible: root.midLeftTab === "tasks"
 
             ColumnLayout {
               anchors.fill: parent
@@ -3730,6 +4054,384 @@ Item {
               Text {
                 Layout.fillWidth: true
                 text: root.miloChatOutput ? root.miloChatOutput : "Ask Milo: 'What are my pending tasks?' or click a chip above."
+                color: root.miloChatOutput ? "#ffffff" : Qt.rgba(1, 1, 0.5)
+                font.pixelSize: 9
+                font.family: "system-ui, sans-serif"
+                elide: Text.ElideRight
+                wrapMode: Text.NoWrap
+              }
+            }
+          }
+
+          // ==================================================================
+          // MODAL VIEW 2: CALENDAR & AGENDA
+          // ==================================================================
+          // Subheader row: Actions & Info
+          RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+            visible: root.midLeftTab === "agenda"
+
+            Text {
+              text: "SOVEREIGN LOCAL TIMELINE // SQLITE (~/.local/share/milo/calendar)"
+              color: Qt.rgba(0, 0.9, 1.0, 0.7)
+              font.pixelSize: 10
+              font.family: "monospace"
+            }
+
+            Item { Layout.fillWidth: true }
+
+            // Spoken Briefing Button
+            Rectangle {
+              height: 24
+              width: briefLabel.implicitWidth + 14
+              radius: 4
+              color: Qt.rgba(0, 0.9, 1.0, 0.15)
+              border.color: "#00f0ff"
+              border.width: 1
+
+              Text {
+                id: briefLabel
+                anchors.centerIn: parent
+                text: "📢 Voice Briefing"
+                color: "#b0f4ff"
+                font.pixelSize: 9
+                font.family: "monospace"
+              }
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                  root.askMilo("give me my daily calendar briefing")
+                }
+              }
+            }
+
+            // Refresh Button
+            Rectangle {
+              height: 24
+              width: refreshLabel.implicitWidth + 14
+              radius: 4
+              color: Qt.rgba(0.08, 0.14, 0.2, 0.6)
+              border.color: Qt.rgba(0, 0.9, 1.0, 0.3)
+              border.width: 1
+
+              Text {
+                id: refreshLabel
+                anchors.centerIn: parent
+                text: "🔄 Refresh"
+                color: "#ffffff"
+                font.pixelSize: 9
+                font.family: "monospace"
+              }
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                  root.reloadAgenda()
+                  root.playSound("chirp")
+                }
+              }
+            }
+          }
+
+          // Agenda items (scrollable)
+          ScrollView {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            clip: true
+            visible: root.midLeftTab === "agenda"
+
+            ColumnLayout {
+              width: modalBox.width - 36
+              spacing: 6
+
+              // Empty state
+              Item {
+                Layout.fillWidth: true
+                height: 80
+                visible: root.agendaList.length === 0
+                ColumnLayout {
+                  anchors.centerIn: parent
+                  spacing: 4
+                  Text {
+                    text: "No calendar events scheduled for today."
+                    color: Qt.rgba(1, 1, 1, 0.5)
+                    font.pixelSize: 11
+                    font.family: "monospace"
+                    Layout.alignment: Qt.AlignHCenter
+                  }
+                  Text {
+                    text: "Type below (e.g. '3pm Sync') or tell Milo to add an event."
+                    color: Qt.rgba(0, 0.9, 1.0, 0.6)
+                    font.pixelSize: 10
+                    font.family: "monospace"
+                    Layout.alignment: Qt.AlignHCenter
+                  }
+                }
+              }
+
+              Repeater {
+                model: root.agendaList
+                delegate: Rectangle {
+                  required property var modelData
+                  Layout.fillWidth: true
+                  height: 48
+                  radius: 7
+                  color: modelData.is_active ? Qt.rgba(0, 0.9, 1.0, 0.18) : Qt.rgba(0.04, 0.10, 0.14, 0.75)
+                  border.color: modelData.is_active ? "#00f0ff" : Qt.rgba(0, 0.8, 1.0, 0.3)
+                  border.width: 1.2
+
+                  RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 10
+                    anchors.rightMargin: 10
+                    spacing: 10
+
+                    // Color stripe
+                    Rectangle {
+                      width: 4; height: 34; radius: 2
+                      color: modelData.color || "#00f0ff"
+                    }
+
+                    // Time badge
+                    Rectangle {
+                      width: 58; height: 26; radius: 4
+                      color: Qt.rgba(0, 0, 0, 0.55)
+                      border.color: modelData.color || "#00f0ff"
+                      border.width: 1
+                      Text {
+                        anchors.centerIn: parent
+                        text: modelData.event_time || "--:--"
+                        color: modelData.color || "#00f0ff"
+                        font.pixelSize: 11
+                        font.bold: true
+                        font.family: "monospace"
+                      }
+                    }
+
+                    // Event Details
+                    ColumnLayout {
+                      Layout.fillWidth: true
+                      spacing: 2
+
+                      RowLayout {
+                        spacing: 8
+                        Text {
+                          text: modelData.title || ""
+                          color: "#ffffff"
+                          font.pixelSize: 12
+                          font.bold: true
+                          font.family: "system-ui, sans-serif"
+                        }
+                        Rectangle {
+                          height: 14
+                          width: catText.implicitWidth + 8
+                          radius: 3
+                          color: Qt.rgba(0, 0.9, 1.0, 0.15)
+                          Text {
+                            id: catText
+                            anchors.centerIn: parent
+                            text: (modelData.category || "EVENT").toUpperCase()
+                            color: "#80f5ff"
+                            font.pixelSize: 8
+                            font.family: "monospace"
+                          }
+                        }
+                      }
+
+                      Text {
+                        Layout.fillWidth: true
+                        text: modelData.description ? modelData.description : ("Duration: " + (modelData.duration_min || 60) + "m")
+                        color: Qt.rgba(1, 1, 1, 0.45)
+                        font.pixelSize: 9
+                        font.family: "system-ui, sans-serif"
+                        elide: Text.ElideRight
+                      }
+                    }
+
+                    // Status text pill
+                    Rectangle {
+                      height: 20
+                      width: statusText.implicitWidth + 10
+                      radius: 3
+                      color: modelData.is_active ? Qt.rgba(0, 0.9, 1.0, 0.25) : Qt.rgba(1, 1, 1, 0.08)
+                      border.color: modelData.is_active ? "#00f0ff" : "transparent"
+                      border.width: 1
+                      Text {
+                        id: statusText
+                        anchors.centerIn: parent
+                        text: modelData.status_text || ""
+                        color: modelData.is_active ? "#00f0ff" : Qt.rgba(1, 1, 1, 0.6)
+                        font.pixelSize: 9
+                        font.family: "monospace"
+                      }
+                    }
+
+                    // Delete button
+                    Rectangle {
+                      width: 22; height: 22; radius: 4
+                      color: Qt.rgba(1, 0.2, 0.3, 0.15)
+                      border.color: Qt.rgba(1, 0.2, 0.3, 0.4)
+                      border.width: 1
+                      Text {
+                        anchors.centerIn: parent
+                        text: "×"
+                        color: "#ff8899"
+                        font.pixelSize: 14
+                        font.bold: true
+                      }
+                      MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.removeAgendaEvent(modelData.id)
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // Add Event Input Box
+          Rectangle {
+            Layout.fillWidth: true
+            height: 34
+            radius: 7
+            color: Qt.rgba(0.04, 0.12, 0.16, 0.90)
+            border.color: modalAgendaInput.activeFocus ? "#00f0ff" : Qt.rgba(0, 0.8, 1.0, 0.5)
+            border.width: 1.2
+            visible: root.midLeftTab === "agenda"
+
+            RowLayout {
+              anchors.fill: parent
+              anchors.leftMargin: 10
+              anchors.rightMargin: 6
+              spacing: 8
+
+              Text { text: "📅"; font.pixelSize: 12 }
+
+              TextInput {
+                id: modalAgendaInput
+                Layout.fillWidth: true
+                color: "#ffffff"
+                font.pixelSize: 11
+                font.family: "system-ui, sans-serif"
+                clip: true
+                selectByMouse: true
+                selectionColor: "#00f0ff"
+
+                Text {
+                  anchors.fill: parent
+                  text: "Quick schedule: e.g. 'Tomorrow 2pm Code Review' or '17:00 Gym' and hit Enter..."
+                  color: Qt.rgba(1, 1, 1, 0.40)
+                  font.pixelSize: 11
+                  font.family: "system-ui, sans-serif"
+                  visible: !modalAgendaInput.text && !modalAgendaInput.activeFocus
+                }
+
+                onAccepted: {
+                  var val = modalAgendaInput.text.trim()
+                  if (val.length > 0) {
+                    root.addAgendaQuick(val)
+                    modalAgendaInput.text = ""
+                  }
+                }
+              }
+
+              Rectangle {
+                width: 90; height: 24; radius: 4
+                color: "#00f0ff"
+                Text {
+                  anchors.centerIn: parent
+                  text: "ADD EVENT"
+                  color: "#060102"
+                  font.pixelSize: 10
+                  font.bold: true
+                  font.family: "monospace"
+                }
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: {
+                    var val = modalAgendaInput.text.trim()
+                    if (val.length > 0) {
+                      root.addAgendaQuick(val)
+                      modalAgendaInput.text = ""
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // Milo AI Calendar Copilot Strip
+          Rectangle {
+            Layout.fillWidth: true
+            height: 68
+            radius: 8
+            color: Qt.rgba(0.04, 0.08, 0.12, 0.75)
+            border.color: Qt.rgba(0, 0.9, 1.0, 0.35)
+            border.width: 1
+            visible: root.midLeftTab === "agenda"
+
+            ColumnLayout {
+              anchors.fill: parent
+              anchors.margins: 6
+              spacing: 4
+
+              RowLayout {
+                Layout.fillWidth: true
+                spacing: 6
+
+                Text {
+                  text: "🤖 MILO CALENDAR COPILOT"
+                  color: "#00e5ff"
+                  font.pixelSize: 9
+                  font.bold: true
+                  font.family: "monospace"
+                }
+
+                Item { Layout.fillWidth: true }
+
+                // Quick AI Action Chips
+                Repeater {
+                  model: [
+                    { label: "📅 Today?", q: "what is on my calendar today?" },
+                    { label: "⏱ Next Event?", q: "what is my next upcoming event?" },
+                    { label: "🎙 Briefing", q: "give me my daily calendar briefing" }
+                  ]
+                  delegate: Rectangle {
+                    required property var modelData
+                    height: 18
+                    width: chipText2.implicitWidth + 10
+                    radius: 3
+                    color: Qt.rgba(0, 0.9, 1.0, 0.15)
+                    border.color: Qt.rgba(0, 0.9, 1.0, 0.4)
+                    border.width: 1
+                    Text {
+                      id: chipText2
+                      anchors.centerIn: parent
+                      text: modelData.label
+                      color: "#b0f4ff"
+                      font.pixelSize: 8
+                      font.family: "monospace"
+                    }
+                    MouseArea {
+                      anchors.fill: parent
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: {
+                        root.askMilo(modelData.q)
+                      }
+                    }
+                  }
+                }
+              }
+
+              // Milo Speech / Chat Feedback snippet
+              Text {
+                Layout.fillWidth: true
+                text: root.miloChatOutput ? root.miloChatOutput : "Ask Milo: 'What is on my calendar today?' or click a chip above."
                 color: root.miloChatOutput ? "#ffffff" : Qt.rgba(1, 1, 1, 0.5)
                 font.pixelSize: 9
                 font.family: "system-ui, sans-serif"

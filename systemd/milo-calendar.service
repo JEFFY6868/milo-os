@@ -1,0 +1,13 @@
+[Unit]
+Description=Milo Sovereign Calendar Heads-Up & Event Reminder Daemon
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/milo-calendar daemon
+Restart=always
+RestartSec=5
+Environment="PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+[Install]
+WantedBy=default.target
