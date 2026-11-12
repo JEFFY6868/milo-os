@@ -793,6 +793,19 @@ def handle_mail_intent(prompt: str) -> Optional[Tuple[str, str]]:
     if not milo_mail_bin.exists():
         return None
 
+    # 0. Anthropic / Claude Priority Sentinel Check & Alert Intent
+    if re.search(r'\b(?:alert|notify|tell)\s+me\s+(?:if|when)\s+(?:there\s+is\s+|i\s+get\s+)?(?:a\s+)?(?:mail|email|message)\s+from\s+(?:anthropic|claude)\b', p) or \
+       re.search(r'\b(?:did|has)\s+(?:anthropic|claude)\s+(?:email|emailed|sent|replied)\b', p) or \
+       re.search(r'\b(?:any|check)\s+(?:mail|email|updates?)\s+from\s+(?:anthropic|claude)\b', p) or \
+       p in ["check anthropic", "check claude", "anthropic email", "claude email", "anthropic sentinel"]:
+        try:
+            res = subprocess.run([str(milo_mail_bin), "sentinel"], capture_output=True, text=True, timeout=12)
+            if res.stdout.strip():
+                clean_out = re.sub(r'\x1b\[[0-9;]*m', '', res.stdout.strip())
+                return clean_out, "Milo Anthropic Sentinel"
+        except Exception:
+            pass
+
     # 1. Unread Mail Summary / Briefing
     if re.search(r'\b(?:summarize|brief\s+me\s+on|give\s+me\s+a\s+summary\s+of)\s+(?:my\s+)?(?:unread\s+)?(?:emails?|mail|inbox)\b', p) or \
        re.search(r'\b(?:email|mail)\s+(?:summary|briefing)\b', p):

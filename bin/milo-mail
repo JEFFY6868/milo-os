@@ -245,6 +245,115 @@ def fetch_unread_messages(client, limit=10):
 
     return items
 
+def check_anthropic_sentinel(client, mark_alerted=True):
+    """
+    Direct server-side IMAP search for incoming priority dispatches from Anthropic or Claude.
+    Triggers critical voice & visual HUD alerts when new emails arrive.
+    """
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    alerted_file = DATA_DIR / "alerted_anthropic.json"
+    alerted_ids = set()
+    if alerted_file.exists():
+        try:
+            with open(alerted_file, "r") as f:
+                alerted_ids = set(json.load(f))
+        except Exception:
+            pass
+
+    client.select("INBOX", readonly=True)
+
+    # Search for UNREAD emails from Anthropic or mentioning Claude/Anthropic
+    query = '(UNSEEN (OR (FROM "anthropic") (OR (FROM "claude") (OR (SUBJECT "anthropic") (SUBJECT "claude")))))'
+    status, response = client.search(None, query)
+    if status != "OK" or not response or not response[0]:
+        return []
+
+    msg_ids = response[0].split()
+    new_matches = []
+
+    for mid in msg_ids:
+        mid_str = mid.decode()
+        if mid_str in alerted_ids:
+            continue
+
+        try:
+            res, data = client.fetch(mid, "(RFC822.HEADER BODY.PEEK[])")
+            if res != "OK":
+                continue
+            raw_email = None
+            for part in data:
+                if isinstance(part, tuple) and len(part) >= 2:
+                    raw_email = part[1]
+                    break
+            if not raw_email:
+                continue
+
+            msg = email.message_from_bytes(raw_email)
+            subject = decode_mime_words(msg.get("Subject", "(No Subject)"))
+            sender = decode_mime_words(msg.get("From", "Anthropic"))
+            date_raw = msg.get("Date", "")
+            time_rel = format_relative_time(date_raw)
+            body = clean_body_text(msg)
+            snippet = (body[:240] + "...") if len(body) > 240 else body
+
+            item = {
+                "id": mid_str,
+                "from": sender,
+                "subject": subject,
+                "date": date_raw,
+                "time_rel": time_rel,
+                "snippet": snippet,
+                "body": body
+            }
+            new_matches.append(item)
+            if mark_alerted:
+                alerted_ids.add(mid_str)
+        except Exception:
+            continue
+
+    if new_matches and mark_alerted:
+        try:
+            with open(alerted_file, "w") as f:
+                json.dump(list(alerted_ids), f)
+        except Exception:
+            pass
+
+        for match in new_matches:
+            sender = match.get("from", "Anthropic")
+            subj = match.get("subject", "Claude Update")
+
+            # 1. Play Alert Sound
+            try:
+                sound_bin = Path.home() / ".local" / "bin" / "milo-sound"
+                if sound_bin.exists():
+                    subprocess.run([str(sound_bin), "alert"], timeout=2)
+            except Exception:
+                pass
+
+            # 2. Critical Desktop Notification
+            try:
+                subprocess.run([
+                    "notify-send",
+                    "-u", "critical",
+                    "-a", "Milo Sentinel",
+                    "-i", "mail-unread",
+                    "🚨 ANTHROPIC / CLAUDE DISPATCH",
+                    f"{subj}\nFrom: {sender}"
+                ], timeout=3)
+            except Exception:
+                pass
+
+            # 3. Voice Announcement
+            try:
+                speak_bin = Path.home() / ".local" / "bin" / "milo-speak"
+                if speak_bin.exists():
+                    voice_msg = f"Jeffy, priority dispatch: you have received an email from Anthropic regarding Claude!"
+                    subprocess.run([str(speak_bin), voice_msg], timeout=5)
+            except Exception:
+                pass
+
+    return new_matches
+
 def cmd_status(args):
     """Check Gmail connectivity and display unread stats."""
     user, password = get_credentials()
@@ -294,13 +403,18 @@ def cmd_sync(args):
     try:
         client = connect_imap(user, password)
         items = fetch_unread_messages(client, limit=15)
+        
+        # Check Priority Anthropic Sentinel Alerts
+        anthropic_matches = check_anthropic_sentinel(client, mark_alerted=True)
+        
         client.logout()
 
         payload = {
             "updated_at": datetime.now().isoformat(),
             "user": user,
             "unread_count": len(items),
-            "emails": items
+            "emails": items,
+            "anthropic_alert": len(anthropic_matches) > 0
         }
 
         with open(INBOX_CACHE, "w", encoding="utf-8") as f:
@@ -315,6 +429,8 @@ def cmd_sync(args):
 
         if not args.quiet:
             print(f"{GREEN}✔ Synced {len(items)} unread emails to {INBOX_CACHE}{RESET}")
+            if anthropic_matches:
+                print(f"{CRIMSON}{BOLD}🚨 ANTHROPIC DISPATCH DETECTED! Sentinel Alert Triggered.{RESET}")
         return 0
     except Exception as e:
         print(f"{CRIMSON}✖ Sync failed:{RESET} {e}")
@@ -552,12 +668,141 @@ def cmd_setup(args):
         print(f"\n{YELLOW}Setup cancelled.{RESET}")
         return 1
 
+def cmd_sentinel(args):
+    """Scan specifically for any incoming or existing emails from Anthropic or Claude."""
+    user, password = get_credentials()
+    if not user or not password:
+        print(f"{CRIMSON}✖ Credentials not configured.{RESET}")
+        return 1
+
+    try:
+        client = connect_imap(user, password)
+        
+        # Check unread sentinel matches and trigger alert if new
+        unread_matches = check_anthropic_sentinel(client, mark_alerted=True)
+        
+        client.select("INBOX", readonly=True)
+        # Search all messages from Anthropic / Claude (even if read)
+        status, response = client.search(None, '(OR (FROM "anthropic") (OR (FROM "claude") (OR (SUBJECT "anthropic") (SUBJECT "claude"))))')
+        
+        all_ids = []
+        if status == "OK" and response and response[0]:
+            all_ids = response[0].split()
+            
+        print(f"\n{CYAN}{BOLD}🛡 MILO ANTHROPIC & CLAUDE SENTINEL{RESET}")
+        print(f"{DIM}{'─' * 65}{RESET}")
+        
+        if unread_matches:
+            print(f"{CRIMSON}{BOLD}🚨 NEW UNREAD DISPATCH FROM ANTHROPIC!{RESET}")
+            for m in unread_matches:
+                print(f" • Subject: {YELLOW}{m['subject']}{RESET}")
+                print(f"   From:    {m['from']}")
+                print(f"   Date:    {m['date']} ({m['time_rel']})")
+                print(f"   Snippet: {DIM}{m['snippet'][:120]}...{RESET}\n")
+        elif all_ids:
+            print(f"{YELLOW}Found {len(all_ids)} existing email(s) from Anthropic / Claude (already read).{RESET}")
+            latest_id = all_ids[-1]
+            res, data = client.fetch(latest_id, "(RFC822.HEADER BODY.PEEK[])")
+            for part in data:
+                if isinstance(part, tuple) and len(part) >= 2:
+                    msg = email.message_from_bytes(part[1])
+                    print(f" Latest: {BOLD}{decode_mime_words(msg.get('Subject'))}{RESET} from {decode_mime_words(msg.get('From'))}")
+                    print(f" Date:   {msg.get('Date')}")
+                    break
+            print(f"\n{GREEN}✔ Sentinel is actively monitoring for new incoming replies every 5m.{RESET}\n")
+        else:
+            print(f"{YELLOW}No emails from Anthropic or Claude found yet.{RESET}")
+            print(f"{GREEN}✔ Milo Sentinel is armed and actively polling your inbox.{RESET}")
+            print(f"{DIM}The instant Anthropic sends an approval or reply, Milo will sound an alarm,{RESET}")
+            print(f"{DIM}flash a critical HUD alert, and announce it over voice.{RESET}\n")
+
+        client.logout()
+        return 0
+    except Exception as e:
+        print(f"{CRIMSON}✖ Sentinel scan error:{RESET} {e}")
+        return 1
+
+def cmd_search(args):
+    """Search inbox for specific keywords (e.g. 'anthropic', 'claude', etc.)."""
+    user, password = get_credentials()
+    if not user or not password:
+        print(f"{CRIMSON}✖ Credentials not configured.{RESET}")
+        return 1
+
+    query = args.query.strip()
+    if not query:
+        print(f"{CRIMSON}✖ Please provide a search term.{RESET}")
+        return 1
+
+    try:
+        client = connect_imap(user, password)
+        client.select("INBOX", readonly=True)
+
+        status, response = client.search(None, f'(OR (FROM "{query}") (SUBJECT "{query}"))')
+        if status != "OK" or not response or not response[0]:
+            status, response = client.search(None, f'(TEXT "{query}")')
+
+        if status != "OK" or not response or not response[0]:
+            client.logout()
+            print(f"{YELLOW}No emails found matching '{query}'.{RESET}")
+            return 0
+
+        msg_ids = response[0].split()
+        latest_ids = msg_ids[-args.limit:][::-1]
+
+        results = []
+        for mid in latest_ids:
+            res, data = client.fetch(mid, "(RFC822.HEADER BODY.PEEK[])")
+            if res != "OK":
+                continue
+            raw_email = None
+            for part in data:
+                if isinstance(part, tuple) and len(part) >= 2:
+                    raw_email = part[1]
+                    break
+            if not raw_email:
+                continue
+            msg = email.message_from_bytes(raw_email)
+            subject = decode_mime_words(msg.get("Subject", "(No Subject)"))
+            sender = decode_mime_words(msg.get("From", "Unknown Sender"))
+            date_raw = msg.get("Date", "")
+            time_rel = format_relative_time(date_raw)
+            body = clean_body_text(msg)
+            snippet = (body[:200] + "...") if len(body) > 200 else body
+            results.append({
+                "id": mid.decode(),
+                "from": sender,
+                "subject": subject,
+                "time_rel": time_rel,
+                "snippet": snippet
+            })
+        client.logout()
+
+        print(f"\n{CYAN}{BOLD}🔍 MILO GMAIL SEARCH:{RESET} '{YELLOW}{query}{RESET}' ({len(results)} matches)")
+        print(f"{DIM}{'─' * 70}{RESET}")
+        for r in results:
+            print(f" {CRIMSON}#{r['id']}{RESET}  {BOLD}{r['from'][:25].ljust(25)}{RESET}  {r['subject'][:35].ljust(35)}  {CYAN}{r['time_rel']}{RESET}")
+            print(f"      {DIM}{r['snippet'][:90]}...{RESET}")
+        print(f"{DIM}{'─' * 70}{RESET}\n")
+        return 0
+    except Exception as e:
+        print(f"{CRIMSON}✖ Search error:{RESET} {e}")
+        return 1
+
 def main():
     parser = argparse.ArgumentParser(description="Milo Sovereign Gmail & Email Engine")
     subparsers = parser.add_subparsers(dest="command")
 
     # setup
     subparsers.add_parser("setup", help="Interactive terminal setup wizard")
+
+    # sentinel
+    subparsers.add_parser("sentinel", help="Scan for Anthropic / Claude priority dispatches")
+
+    # search
+    p_search = subparsers.add_parser("search", help="Search emails by sender or subject")
+    p_search.add_argument("query", help="Keyword to search for")
+    p_search.add_argument("--limit", "-n", type=int, default=10, help="Number of results")
 
     # status
     p_status = subparsers.add_parser("status", help="Check inbox status & unread count")
@@ -603,6 +848,8 @@ def main():
 
     cmds = {
         "setup": cmd_setup,
+        "sentinel": cmd_sentinel,
+        "search": cmd_search,
         "status": cmd_status,
         "sync": cmd_sync,
         "list": cmd_list,
