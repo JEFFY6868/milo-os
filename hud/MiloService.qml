@@ -63,6 +63,15 @@ Item {
   property bool ccNightlightEnabled: false
   property bool ccBarOff: true
   property bool ccVoiceActive: true
+  property bool ccWifiScannerOpen: false
+  property bool ccBtScannerOpen: false
+  property var ccWifiList: []
+  property var ccBtList: []
+  property bool ccIsScanningWifi: false
+  property bool ccIsScanningBt: false
+  property string ccWifiSelectedSSID: ""
+  property string ccWifiPasswordInput: ""
+  property bool ccWifiShowPasswordInput: false
 
   // Dynamic Persistent Milo Scratchpad & Calendar
   property bool scratchpadModalOpen: false
@@ -391,6 +400,14 @@ Item {
           } else if (act === "open") {
             root.controlCenterOpen = true
             root.refreshControlCenter()
+          } else if (act === "open_wifi") {
+            root.controlCenterOpen = true
+            root.ccWifiScannerOpen = true
+            root.startWifiScan()
+          } else if (act === "open_bt") {
+            root.controlCenterOpen = true
+            root.ccBtScannerOpen = true
+            root.startBtScan()
           } else if (act === "close") {
             root.controlCenterOpen = false
           } else if (act === "refresh") {
@@ -504,6 +521,113 @@ Item {
     quickCmdProc.command = [root.homeDir + "/.local/bin/milo-hud"]
     quickCmdProc.running = true
     root.playSound("activate")
+  }
+
+  Process {
+    id: ccWifiScanProc
+    command: [root.homeDir + "/.local/bin/milo-control-center", "wifi-scan"]
+    stdout: StdioCollector {
+      onStreamFinished: {
+        root.ccIsScanningWifi = false
+        try {
+          if (text && text.trim().length > 0) {
+            var lines = text.trim().split("\n")
+            var jsonStr = ""
+            var start = false
+            for (var i = 0; i < lines.length; i++) {
+              if (lines[i].trim().startsWith("[")) start = true
+              if (start) jsonStr += lines[i] + "\n"
+            }
+            if (jsonStr) {
+              var arr = JSON.parse(jsonStr)
+              if (Array.isArray(arr)) root.ccWifiList = arr
+            }
+          }
+        } catch(e) {}
+      }
+    }
+  }
+
+  function startWifiScan() {
+    root.ccIsScanningWifi = true
+    if (!ccWifiScanProc.running) ccWifiScanProc.running = true
+    root.playSound("chirp")
+  }
+
+  function connectToWifi(ssid, pwd) {
+    var cmd = [root.homeDir + "/.local/bin/milo-control-center", "wifi-connect", ssid]
+    if (pwd) cmd.push(pwd)
+    quickCmdProc.command = cmd
+    quickCmdProc.running = true
+    root.playSound("connect")
+    root.ccWifiShowPasswordInput = false
+    root.ccWifiPasswordInput = ""
+    wifiRefreshTimer.restart()
+  }
+
+  Timer {
+    id: wifiRefreshTimer
+    interval: 2000
+    repeat: false
+    onTriggered: {
+      root.refreshControlCenter()
+      root.startWifiScan()
+    }
+  }
+
+  Process {
+    id: ccBtScanProc
+    command: [root.homeDir + "/.local/bin/milo-control-center", "bt-scan"]
+    stdout: StdioCollector {
+      onStreamFinished: {
+        root.ccIsScanningBt = false
+        try {
+          if (text && text.trim().length > 0) {
+            var lines = text.trim().split("\n")
+            var jsonStr = ""
+            var start = false
+            for (var i = 0; i < lines.length; i++) {
+              if (lines[i].trim().startsWith("[")) start = true
+              if (start) jsonStr += lines[i] + "\n"
+            }
+            if (jsonStr) {
+              var arr = JSON.parse(jsonStr)
+              if (Array.isArray(arr)) root.ccBtList = arr
+            }
+          }
+        } catch(e) {}
+      }
+    }
+  }
+
+  function startBtScan() {
+    root.ccIsScanningBt = true
+    if (!ccBtScanProc.running) ccBtScanProc.running = true
+    root.playSound("chirp")
+  }
+
+  function connectToBt(mac) {
+    quickCmdProc.command = [root.homeDir + "/.local/bin/milo-control-center", "bt-connect", mac]
+    quickCmdProc.running = true
+    root.playSound("connect")
+    btRefreshTimer.restart()
+  }
+
+  function disconnectFromBt(mac) {
+    quickCmdProc.command = [root.homeDir + "/.local/bin/milo-control-center", "bt-disconnect", mac]
+    quickCmdProc.running = true
+    root.playSound("switch")
+    btRefreshTimer.restart()
+  }
+
+  Timer {
+    id: btRefreshTimer
+    interval: 2000
+    repeat: false
+    onTriggered: {
+      root.refreshControlCenter()
+      root.startBtScan()
+    }
   }
 
   // Voice Dictation watcher (auto-queries when Phonon-2 finishes)
@@ -1217,6 +1341,20 @@ Item {
       root.controlCenterOpen = true
       root.refreshControlCenter()
       return "open"
+    }
+
+    function openWifiScanner(): string {
+      root.controlCenterOpen = true
+      root.ccWifiScannerOpen = true
+      root.startWifiScan()
+      return "wifi_scanner_open"
+    }
+
+    function openBtScanner(): string {
+      root.controlCenterOpen = true
+      root.ccBtScannerOpen = true
+      root.startBtScan()
+      return "bt_scanner_open"
     }
 
     function closeControlCenter(): string {
@@ -6328,8 +6466,17 @@ Item {
         Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) {
           if (event.key === Qt.Key_Escape) {
-            root.controlCenterOpen = false
-            event.accepted = true
+            if (root.ccWifiScannerOpen) {
+              root.ccWifiScannerOpen = false
+              root.ccWifiShowPasswordInput = false
+              event.accepted = true
+            } else if (root.ccBtScannerOpen) {
+              root.ccBtScannerOpen = false
+              event.accepted = true
+            } else {
+              root.controlCenterOpen = false
+              event.accepted = true
+            }
           }
         }
 
@@ -6366,9 +6513,11 @@ Item {
           Rectangle { x: parent.width - 10; y: parent.height - 20; width: 2; height: 12; color: "#ff0838" }
 
           ColumnLayout {
+            id: ccMainView
             anchors.fill: parent
             anchors.margins: 24
             spacing: 16
+            visible: !root.ccWifiScannerOpen && !root.ccBtScannerOpen
 
             // HEADER
             RowLayout {
@@ -6844,8 +6993,8 @@ Item {
                       hoverEnabled: true
                       cursorShape: Qt.PointingHandCursor
                       onClicked: {
-                        quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Network Manager", "nmtui"]
-                        quickCmdProc.running = true
+                        root.ccWifiScannerOpen = true
+                        root.startWifiScan()
                       }
                     }
                   }
@@ -6940,8 +7089,8 @@ Item {
                       hoverEnabled: true
                       cursorShape: Qt.PointingHandCursor
                       onClicked: {
-                        quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // Bluetooth Manager", "bluetoothctl"]
-                        quickCmdProc.running = true
+                        root.ccBtScannerOpen = true
+                        root.startBtScan()
                       }
                     }
                   }
@@ -7169,6 +7318,533 @@ Item {
                   font.pixelSize: 9
                   font.bold: true
                   font.family: "monospace"
+                }
+              }
+            }
+          }
+
+          // ================================================================
+          // CYBERPUNK WI-FI SCANNER VIEW (In-Capsule Native Scanner)
+          // ================================================================
+          ColumnLayout {
+            id: ccWifiScannerView
+            anchors.fill: parent
+            anchors.margins: 24
+            spacing: 16
+            visible: root.ccWifiScannerOpen
+
+            // Scanner Header
+            RowLayout {
+              Layout.fillWidth: true
+              spacing: 12
+
+              ColumnLayout {
+                spacing: 3
+                RowLayout {
+                  spacing: 10
+                  Text {
+                    text: "📶  WI-FI NETWORK RADAR"
+                    color: "#00f0ff"
+                    font.pixelSize: 15
+                    font.bold: true
+                    font.family: "monospace"
+                    font.letterSpacing: 1.5
+                  }
+                  Rectangle {
+                    height: 18
+                    width: 90
+                    radius: 3
+                    color: root.ccIsScanningWifi ? Qt.rgba(0, 0.94, 1.0, 0.3) : Qt.rgba(0, 1.0, 0.53, 0.2)
+                    border.color: root.ccIsScanningWifi ? "#00f0ff" : "#00ff88"
+                    Text {
+                      anchors.centerIn: parent
+                      text: root.ccIsScanningWifi ? "SCANNING..." : (root.ccWifiList.length + " FOUND")
+                      color: root.ccIsScanningWifi ? "#00f0ff" : "#00ff88"
+                      font.pixelSize: 9
+                      font.bold: true
+                      font.family: "monospace"
+                    }
+                  }
+                }
+                Text {
+                  text: "Real-time Access Point Grounding via NetworkManager (nmcli)"
+                  color: Qt.rgba(1, 1, 1, 0.5)
+                  font.pixelSize: 10
+                  font.family: "monospace"
+                }
+              }
+
+              Item { Layout.fillWidth: true }
+
+              // Rescan Button
+              Rectangle {
+                height: 28
+                width: 100
+                radius: 4
+                color: rescanBtnArea.containsMouse ? Qt.rgba(0, 0.94, 1.0, 0.25) : Qt.rgba(0, 0.94, 1.0, 0.12)
+                border.color: "#00f0ff"
+                border.width: 1
+
+                RowLayout {
+                  anchors.centerIn: parent
+                  spacing: 6
+                  Text { text: "🔄"; font.pixelSize: 10 }
+                  Text {
+                    text: "RESCAN"
+                    color: "#00f0ff"
+                    font.pixelSize: 10
+                    font.bold: true
+                    font.family: "monospace"
+                  }
+                }
+
+                MouseArea {
+                  id: rescanBtnArea
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.startWifiScan()
+                }
+              }
+
+              // Back Button
+              Rectangle {
+                height: 28
+                width: 76
+                radius: 4
+                color: backWifiArea.containsMouse ? "#ff0838" : Qt.rgba(1.0, 0.03, 0.22, 0.15)
+                border.color: "#ff0838"
+                border.width: 1
+
+                RowLayout {
+                  anchors.centerIn: parent
+                  spacing: 4
+                  Text {
+                    text: "◂ BACK"
+                    color: backWifiArea.containsMouse ? "#000000" : "#ff2a55"
+                    font.pixelSize: 10
+                    font.bold: true
+                    font.family: "monospace"
+                  }
+                }
+
+                MouseArea {
+                  id: backWifiArea
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: {
+                    root.ccWifiScannerOpen = false
+                    root.ccWifiShowPasswordInput = false
+                  }
+                }
+              }
+            }
+
+            // Inline Password Prompt (if opened)
+            Rectangle {
+              Layout.fillWidth: true
+              height: root.ccWifiShowPasswordInput ? 44 : 0
+              visible: root.ccWifiShowPasswordInput
+              radius: 6
+              color: Qt.rgba(0.08, 0.02, 0.04, 0.95)
+              border.color: "#00f0ff"
+              border.width: 1
+              clip: true
+
+              RowLayout {
+                anchors.fill: parent
+                anchors.margins: 8
+                spacing: 10
+
+                Text {
+                  text: "PASSWORD FOR '" + root.ccWifiSelectedSSID + "':"
+                  color: "#00f0ff"
+                  font.pixelSize: 10
+                  font.bold: true
+                  font.family: "monospace"
+                }
+
+                Rectangle {
+                  Layout.fillWidth: true
+                  height: 28
+                  radius: 4
+                  color: Qt.rgba(0, 0, 0, 0.6)
+                  border.color: Qt.rgba(0, 0.94, 1.0, 0.4)
+
+                  TextInput {
+                    id: ccWifiPassField
+                    anchors.fill: parent
+                    anchors.margins: 6
+                    color: "#ffffff"
+                    font.pixelSize: 11
+                    font.family: "monospace"
+                    echoMode: TextInput.Password
+                    focus: root.ccWifiShowPasswordInput
+                    onAccepted: {
+                      root.connectToWifi(root.ccWifiSelectedSSID, text)
+                    }
+                  }
+                }
+
+                Rectangle {
+                  width: 80
+                  height: 28
+                  radius: 4
+                  color: "#00f0ff"
+                  Text {
+                    anchors.centerIn: parent
+                    text: "CONNECT"
+                    color: "#000000"
+                    font.pixelSize: 10
+                    font.bold: true
+                    font.family: "monospace"
+                  }
+                  MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                      root.connectToWifi(root.ccWifiSelectedSSID, ccWifiPassField.text)
+                    }
+                  }
+                }
+
+                Rectangle {
+                  width: 28
+                  height: 28
+                  radius: 14
+                  color: Qt.rgba(1, 1, 1, 0.1)
+                  Text {
+                    anchors.centerIn: parent
+                    text: "✕"
+                    color: "#ffffff"
+                    font.pixelSize: 10
+                  }
+                  MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.ccWifiShowPasswordInput = false
+                  }
+                }
+              }
+            }
+
+            // Scrollable List of Wi-Fi Networks
+            ListView {
+              id: ccWifiListView
+              Layout.fillWidth: true
+              Layout.fillHeight: true
+              clip: true
+              spacing: 8
+              model: root.ccWifiList
+
+              delegate: Rectangle {
+                width: ccWifiListView.width - 6
+                height: 52
+                radius: 6
+                color: modelData.in_use ? Qt.rgba(0, 1.0, 0.53, 0.12) : (netItemArea.containsMouse ? Qt.rgba(0, 0.94, 1.0, 0.10) : Qt.rgba(1, 1, 1, 0.04))
+                border.color: modelData.in_use ? "#00ff88" : (netItemArea.containsMouse ? "#00f0ff" : Qt.rgba(1, 1, 1, 0.08))
+                border.width: 1
+
+                RowLayout {
+                  anchors.fill: parent
+                  anchors.leftMargin: 14
+                  anchors.rightMargin: 14
+                  spacing: 12
+
+                  Text {
+                    text: modelData.signal >= 70 ? "📶" : (modelData.signal >= 40 ? "📶" : "📡")
+                    font.pixelSize: 14
+                  }
+
+                  ColumnLayout {
+                    spacing: 2
+                    RowLayout {
+                      spacing: 8
+                      Text {
+                        text: modelData.ssid
+                        color: modelData.in_use ? "#00ff88" : "#ffffff"
+                        font.pixelSize: 12
+                        font.bold: true
+                        font.family: "monospace"
+                      }
+                      Rectangle {
+                        height: 16
+                        width: secText.implicitWidth + 8
+                        radius: 3
+                        color: Qt.rgba(1, 1, 1, 0.08)
+                        Text {
+                          id: secText
+                          anchors.centerIn: parent
+                          text: modelData.security
+                          color: Qt.rgba(1, 1, 1, 0.6)
+                          font.pixelSize: 8
+                          font.family: "monospace"
+                        }
+                      }
+                    }
+                    Text {
+                      text: "Signal Strength: " + modelData.signal + "%"
+                      color: Qt.rgba(1, 1, 1, 0.4)
+                      font.pixelSize: 9
+                      font.family: "monospace"
+                    }
+                  }
+
+                  Item { Layout.fillWidth: true }
+
+                  // Action Button
+                  Rectangle {
+                    height: 28
+                    width: modelData.in_use ? 85 : 92
+                    radius: 4
+                    color: modelData.in_use ? Qt.rgba(0, 1.0, 0.53, 0.20) : "#00f0ff"
+                    border.color: modelData.in_use ? "#00ff88" : "#00f0ff"
+
+                    Text {
+                      anchors.centerIn: parent
+                      text: modelData.in_use ? "CONNECTED" : "CONNECT ➔"
+                      color: modelData.in_use ? "#00ff88" : "#000000"
+                      font.pixelSize: 9
+                      font.bold: true
+                      font.family: "monospace"
+                    }
+
+                    MouseArea {
+                      anchors.fill: parent
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: {
+                        if (modelData.in_use) return
+                        if (modelData.security === "Open") {
+                          root.connectToWifi(modelData.ssid)
+                        } else {
+                          root.ccWifiSelectedSSID = modelData.ssid
+                          root.ccWifiShowPasswordInput = true
+                        }
+                      }
+                    }
+                  }
+                }
+
+                MouseArea {
+                  id: netItemArea
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  z: -1
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: {
+                    if (!modelData.in_use) {
+                      root.ccWifiSelectedSSID = modelData.ssid
+                      root.ccWifiShowPasswordInput = true
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // ================================================================
+          // CYBERPUNK BLUETOOTH HARDWARE RACK VIEW (In-Capsule)
+          // ================================================================
+          ColumnLayout {
+            id: ccBtScannerView
+            anchors.fill: parent
+            anchors.margins: 24
+            spacing: 16
+            visible: root.ccBtScannerOpen
+
+            // Header
+            RowLayout {
+              Layout.fillWidth: true
+              spacing: 12
+
+              ColumnLayout {
+                spacing: 3
+                RowLayout {
+                  spacing: 10
+                  Text {
+                    text: "󰂯  BLUETOOTH HARDWARE RACK"
+                    color: "#ff2a55"
+                    font.pixelSize: 15
+                    font.bold: true
+                    font.family: "monospace"
+                    font.letterSpacing: 1.5
+                  }
+                  Rectangle {
+                    height: 18
+                    width: 90
+                    radius: 3
+                    color: Qt.rgba(1.0, 0.03, 0.22, 0.2)
+                    border.color: "#ff0838"
+                    Text {
+                      anchors.centerIn: parent
+                      text: (root.ccBtList.length + " REGISTERED")
+                      color: "#ff2a55"
+                      font.pixelSize: 9
+                      font.bold: true
+                      font.family: "monospace"
+                    }
+                  }
+                }
+                Text {
+                  text: "Hardware Pairing & Handshake Controller (bluetoothctl)"
+                  color: Qt.rgba(1, 1, 1, 0.5)
+                  font.pixelSize: 10
+                  font.family: "monospace"
+                }
+              }
+
+              Item { Layout.fillWidth: true }
+
+              // Rescan Button
+              Rectangle {
+                height: 28
+                width: 100
+                radius: 4
+                color: rescanBtArea.containsMouse ? Qt.rgba(1.0, 0.03, 0.22, 0.35) : Qt.rgba(1.0, 0.03, 0.22, 0.15)
+                border.color: "#ff0838"
+                border.width: 1
+
+                RowLayout {
+                  anchors.centerIn: parent
+                  spacing: 6
+                  Text { text: "🔄"; font.pixelSize: 10 }
+                  Text {
+                    text: "REFRESH"
+                    color: "#ff2a55"
+                    font.pixelSize: 10
+                    font.bold: true
+                    font.family: "monospace"
+                  }
+                }
+
+                MouseArea {
+                  id: rescanBtArea
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.startBtScan()
+                }
+              }
+
+              // Back Button
+              Rectangle {
+                height: 28
+                width: 76
+                radius: 4
+                color: backBtArea.containsMouse ? "#ff0838" : Qt.rgba(1.0, 0.03, 0.22, 0.15)
+                border.color: "#ff0838"
+                border.width: 1
+
+                RowLayout {
+                  anchors.centerIn: parent
+                  spacing: 4
+                  Text {
+                    text: "◂ BACK"
+                    color: backBtArea.containsMouse ? "#000000" : "#ff2a55"
+                    font.pixelSize: 10
+                    font.bold: true
+                    font.family: "monospace"
+                  }
+                }
+
+                MouseArea {
+                  id: backBtArea
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.ccBtScannerOpen = false
+                }
+              }
+            }
+
+            // Scrollable List of Bluetooth Devices
+            ListView {
+              id: ccBtListView
+              Layout.fillWidth: true
+              Layout.fillHeight: true
+              clip: true
+              spacing: 8
+              model: root.ccBtList
+
+              delegate: Rectangle {
+                width: ccBtListView.width - 6
+                height: 52
+                radius: 6
+                color: modelData.connected ? Qt.rgba(0, 1.0, 0.53, 0.12) : (btItemArea.containsMouse ? Qt.rgba(1.0, 0.03, 0.22, 0.15) : Qt.rgba(1, 1, 1, 0.04))
+                border.color: modelData.connected ? "#00ff88" : (btItemArea.containsMouse ? "#ff0838" : Qt.rgba(1, 1, 1, 0.08))
+                border.width: 1
+
+                RowLayout {
+                  anchors.fill: parent
+                  anchors.leftMargin: 14
+                  anchors.rightMargin: 14
+                  spacing: 12
+
+                  Text {
+                    text: "󰂯"
+                    font.pixelSize: 16
+                    color: modelData.connected ? "#00ff88" : "#ff2a55"
+                  }
+
+                  ColumnLayout {
+                    spacing: 2
+                    RowLayout {
+                      spacing: 8
+                      Text {
+                        text: modelData.name
+                        color: modelData.connected ? "#00ff88" : "#ffffff"
+                        font.pixelSize: 12
+                        font.bold: true
+                        font.family: "monospace"
+                      }
+                    }
+                    Text {
+                      text: "MAC: " + modelData.mac
+                      color: Qt.rgba(1, 1, 1, 0.4)
+                      font.pixelSize: 9
+                      font.family: "monospace"
+                    }
+                  }
+
+                  Item { Layout.fillWidth: true }
+
+                  // Connect/Disconnect Button
+                  Rectangle {
+                    height: 28
+                    width: modelData.connected ? 95 : 90
+                    radius: 4
+                    color: modelData.connected ? Qt.rgba(1.0, 0.03, 0.22, 0.20) : "#ff0838"
+                    border.color: "#ff0838"
+
+                    Text {
+                      anchors.centerIn: parent
+                      text: modelData.connected ? "DISCONNECT" : "CONNECT ➔"
+                      color: modelData.connected ? "#ff2a55" : "#000000"
+                      font.pixelSize: 9
+                      font.bold: true
+                      font.family: "monospace"
+                    }
+
+                    MouseArea {
+                      anchors.fill: parent
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: {
+                        if (modelData.connected) {
+                          root.disconnectFromBt(modelData.mac)
+                        } else {
+                          root.connectToBt(modelData.mac)
+                        }
+                      }
+                    }
+                  }
+                }
+
+                MouseArea {
+                  id: btItemArea
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  z: -1
                 }
               }
             }
