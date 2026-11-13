@@ -283,6 +283,7 @@ Item {
     watchChanges: true
     atomicWrites: true
     printErrors: false
+    onFileChanged: reload()
     onLoaded: {
       try {
         var raw = text().trim()
@@ -299,6 +300,7 @@ Item {
     path: root.homeDir + "/.local/share/milo/calendar/agenda_today.json"
     watchChanges: true
     printErrors: false
+    onFileChanged: reload()
     onLoaded: {
       try {
         var raw = text().trim()
@@ -315,6 +317,7 @@ Item {
     path: root.homeDir + "/.local/share/milo/calendar/worktime.json"
     watchChanges: true
     printErrors: false
+    onFileChanged: reload()
     onLoaded: {
       try {
         var raw = text().trim()
@@ -331,6 +334,7 @@ Item {
     path: root.homeDir + "/.local/share/milo/mail/inbox.json"
     watchChanges: true
     printErrors: false
+    onFileChanged: reload()
     onLoaded: {
       try {
         var raw = text().trim()
@@ -347,6 +351,7 @@ Item {
     path: root.homeDir + "/.local/share/milo/whatsapp/inbox.json"
     watchChanges: true
     printErrors: false
+    onFileChanged: reload()
     onLoaded: {
       try {
         var raw = text().trim()
@@ -363,13 +368,10 @@ Item {
     path: "/tmp/milo-whatsapp-trigger"
     watchChanges: true
     printErrors: false
+    onFileChanged: reload()
     onLoaded: {
       try {
-        var rawW = whatsappFile.text().trim()
-        if (rawW) {
-          var wObj = JSON.parse(rawW)
-          if (wObj && typeof wObj === 'object') root.whatsappData = wObj
-        }
+        whatsappFile.reload()
       } catch(e) {}
     }
   }
@@ -380,6 +382,7 @@ Item {
     path: "/tmp/milo-scratchpad-trigger"
     watchChanges: true
     printErrors: false
+    onFileChanged: reload()
     onLoaded: {
       try {
         var raw = text().trim()
@@ -1458,6 +1461,23 @@ Item {
     function openScratchpad(): string {
       root.scratchpadModalOpen = true
       return "open"
+    }
+
+    function openWhatsApp(): string {
+      root.midLeftTab = "whatsapp"
+      root.scratchpadModalOpen = true
+      return "open"
+    }
+
+    function openMail(): string {
+      root.midLeftTab = "mail"
+      root.scratchpadModalOpen = true
+      return "open"
+    }
+
+    function switchTab(tab: string): string {
+      root.midLeftTab = tab
+      return tab
     }
 
     function closeScratchpad(): string {
@@ -5271,7 +5291,7 @@ Item {
           height: 540
           radius: 14
           color: Qt.rgba(0.06, 0.01, 0.02, 0.96)
-          border.color: root.midLeftTab === "mail" ? "#ffaa00" : (root.midLeftTab === "agenda" ? "#00f0ff" : "#ff0838")
+          border.color: root.midLeftTab === "whatsapp" ? "#25d366" : (root.midLeftTab === "mail" ? "#ffaa00" : (root.midLeftTab === "agenda" ? "#00f0ff" : "#ff0838"))
           border.width: 1.5
 
         // Prevent click-through
