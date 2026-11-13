@@ -106,7 +106,12 @@ class MiloSupervisor:
                 raise ValueError(f"Verification command contains shell metacharacters: {verify_cmd!r}")
             verify_argv = shlex.split(verify_cmd)
             allowed_verify = {"bash", "sh", "python3", "systemctl", "true", "test"}
-            if not verify_argv or Path(verify_argv[0]).name not in allowed_verify:
+            verify_bin = Path(verify_argv[0]).resolve()
+            is_allowed = (
+                verify_bin.name in allowed_verify
+                or (verify_bin.parent == (Path.home() / ".local" / "bin") and verify_bin.name.startswith("milo-"))
+            )
+            if not verify_argv or not is_allowed:
                 raise ValueError(f"Verification binary not allowlisted: {verify_argv[:1]}")
 
             # Step 1: Pre-flight & Backups

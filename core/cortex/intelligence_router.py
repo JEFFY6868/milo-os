@@ -339,7 +339,7 @@ def _deadline(fn, timeout: float):
     return box[0] if box else None
 
 
-def query_gemini_cloud(prompt: str, timeout: float = 6.0) -> Optional[str]:
+def query_gemini_cloud(prompt: str, timeout: float = 12.0) -> Optional[str]:
     """Query Gemini Cloud via Google GenAI SDK with strict timeout."""
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
@@ -376,13 +376,19 @@ def query_gemini_cloud(prompt: str, timeout: float = 6.0) -> Optional[str]:
                     "You are Milo (J.A.R.V.I.S.), an ambient AI desktop companion and Arch Linux copilot on Hyprland. "
                     "Keep answers concise, precise, engaging, and practical. Output exact terminal syntax when requested."
                 )
-            resp = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt,
-                config={"system_instruction": system_instruction}
-            )
-            if resp and resp.text:
-                return resp.text.strip()
+            gemini_models = ["gemini-2.5-flash-lite", "gemini-3.8-flash", "gemini-2.5-flash"]
+            for gmod in gemini_models:
+                try:
+                    resp = client.models.generate_content(
+                        model=gmod,
+                        contents=prompt,
+                        config={"system_instruction": system_instruction}
+                    )
+                    if resp and resp.text:
+                        return resp.text.strip()
+                except Exception as ge:
+                    sys.stderr.write(f"Gemini model {gmod} error: {ge}\n")
+                    continue
             return None
         except Exception as e:
             sys.stderr.write(f"Gemini error: {e}\n")
@@ -391,8 +397,8 @@ def query_gemini_cloud(prompt: str, timeout: float = 6.0) -> Optional[str]:
     return _deadline(_call, timeout)
 
 
-def query_groq_cloud(prompt: str, timeout: float = 4.0) -> Optional[str]:
-    """Query Groq Cloud via Groq SDK with ultra-fast Llama-3.3-70B failover."""
+def query_groq_cloud(prompt: str, timeout: float = 10.0) -> Optional[str]:
+    """Query Groq Cloud via Groq SDK with ultra-fast multi-model failover."""
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
         env_f = CONFIG_DIR / "keys.env"
@@ -421,7 +427,7 @@ def query_groq_cloud(prompt: str, timeout: float = 4.0) -> Optional[str]:
                     "Keep answers concise, precise, engaging, and practical. Output exact terminal syntax when requested."
                 )
             # Fast, high-throughput Groq models
-            models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+            models = ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
             for mod in models:
                 try:
                     resp = client.chat.completions.create(
@@ -1228,11 +1234,11 @@ def execute_hybrid_query(prompt: str) -> Tuple[str, str]:
                 return f"[Offline Fallback]: {ans}", "⚡ Cortex Local (Offline Failover)"
             return "Network disconnected and local daemon unavailable.", "Error"
         # Try ultra-fast Groq Cloud first (sub-second inference)
-        groq_ans = query_groq_cloud(query_prompt, timeout=5.0)
+        groq_ans = query_groq_cloud(query_prompt, timeout=10.0)
         if groq_ans:
-            return groq_ans, "⚡ Groq Cloud (Llama 3.3 70B)"
+            return groq_ans, "⚡ Groq Cloud (Qwen/Llama)"
         # Fallback to Gemini Cloud
-        ans = query_gemini_cloud(query_prompt, timeout=8.0)
+        ans = query_gemini_cloud(query_prompt, timeout=12.0)
         if ans:
             return ans, "🌐 Gemini Cloud"
         # Cloud failed, fallback to local
@@ -1244,11 +1250,11 @@ def execute_hybrid_query(prompt: str) -> Tuple[str, str]:
     # 3. Auto Mode (Smart Failover)
     if online:
         # Try ultra-fast Groq Cloud first (sub-second inference)
-        groq_ans = query_groq_cloud(query_prompt, timeout=5.0)
+        groq_ans = query_groq_cloud(query_prompt, timeout=10.0)
         if groq_ans:
-            return groq_ans, "⚡ Groq Cloud (Llama 3.3 70B)"
+            return groq_ans, "⚡ Groq Cloud (Qwen/Llama)"
         # Fallback to Gemini Cloud
-        cloud_ans = query_gemini_cloud(query_prompt, timeout=8.0)
+        cloud_ans = query_gemini_cloud(query_prompt, timeout=12.0)
         if cloud_ans:
             return cloud_ans, "🌐 Gemini Cloud"
 

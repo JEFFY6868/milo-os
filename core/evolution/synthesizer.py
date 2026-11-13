@@ -81,8 +81,8 @@ class MiloSynthesizer:
 
         try:
             raw_response, provider = intelligence_router.execute_hybrid_query(prompt)
-            meta_match = re.search(r"---METADATA---\s*(.*?)\s*---SCRIPT:\s*([^\n\r]+)---", raw_response, re.DOTALL)
-            script_match = re.search(r"---SCRIPT:[^\n\r]+---\s*(.*?)\s*(?:---END---|$)", raw_response, re.DOTALL)
+            meta_match = re.search(r"---\s*METADATA\s*---\s*(.*?)\s*---\s*SCRIPT:\s*([^\n\r]+?)\s*---", raw_response, re.DOTALL | re.IGNORECASE)
+            script_match = re.search(r"---\s*SCRIPT:\s*[^\n\r]+?---\s*(.*?)\s*(?:---\s*END\s*---|```\s*$|$)", raw_response, re.DOTALL | re.IGNORECASE)
 
             if not meta_match or not script_match:
                 return None
@@ -96,6 +96,12 @@ class MiloSynthesizer:
                 resolved_target = allowed_bin / f"milo-wish-{int(time.time())}"
             target_path = str(resolved_target)
             script_content = script_match.group(1).strip()
+            # Strip markdown code fences if wrapped by LLM
+            if script_content.startswith("```"):
+                script_content = re.sub(r"^```[a-zA-Z0-9_-]*\r?\n?", "", script_content)
+            if script_content.endswith("```"):
+                script_content = re.sub(r"\r?\n?```$", "", script_content)
+            script_content = script_content.strip()
 
             meta = {}
             for line in meta_block.split("\n"):
