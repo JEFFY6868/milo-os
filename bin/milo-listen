@@ -172,6 +172,15 @@ def main():
             notify("✦ Milo Evolution", "Analyzing diagnostics & planning upgrade...", timeout=2500)
             subprocess.run([str(Path.home() / ".local/bin/milo-evolve"), "plan"], check=False)
             return
+        elif any(cleaned_lower.startswith(p) for p in ["open ", "launch ", "start ", "run ", "switch to "]) or (
+            cleaned_lower.startswith("milo ") and any(cleaned_lower[5:].startswith(p) for p in ["open ", "launch ", "start ", "run ", "switch to "])
+        ):
+            app_target = re.sub(r"^(?:milo\s+)?(?:open|launch|start|run|switch\s+to)\s+", "", cleaned_lower, flags=re.IGNORECASE).strip()
+            app_target = re.sub(r"\s+(?:for\s+me|please|app)$", "", app_target, flags=re.IGNORECASE).strip()
+            if app_target:
+                notify("🚀 Milo App Launcher", f"Launching: {app_target.title()}...", timeout=2500)
+                subprocess.Popen([str(Path.home() / ".local/bin/milo-open"), app_target])
+                return
 
         inject_text(text)
         notify("✍️ Dictated", text, timeout=3500)

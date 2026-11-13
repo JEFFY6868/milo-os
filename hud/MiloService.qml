@@ -1141,6 +1141,32 @@ Item {
       return
     }
 
+    // 0.03 Application Launch & Window Focus Intent ("open ...", "launch ...", "start ...", "run ...", "/open ...")
+    var isOpenIntent = (
+      lower.startsWith("open ") || lower.startsWith("/open ") ||
+      lower.startsWith("launch ") || lower.startsWith("/launch ") ||
+      lower.startsWith("start app ") || lower.startsWith("/start ") ||
+      lower.startsWith("run app ") || lower.startsWith("/run ") ||
+      lower.startsWith("milo open ") || lower.startsWith("milo launch ") ||
+      lower.startsWith("can you open ") || lower.startsWith("please open ") ||
+      lower.startsWith("switch to ") || lower.startsWith("/switch ")
+    )
+
+    if (isOpenIntent) {
+      var appQuery = raw.replace(/^(?:\/open|\/launch|\/start|\/run|\/switch|open|launch|start\s+app|run\s+app|milo\s+open|milo\s+launch|can\s+(?:you|u)\s+open|please\s+open|switch\s+to)\s+/i, "").trim()
+      appQuery = appQuery.replace(/\s+(?:for\s+me|please|app)$/i, "").trim()
+      if (appQuery.length > 0) {
+        root.hudVisible = true
+        root.isThinking = false
+        root.playSound("chirp")
+        root.miloChatOutput = "🚀 **[APPLICATION DISPATCHER ACTIVE]**\n\n✦ Target: `" + appQuery + "`\n✦ Resolving desktop application & focusing workspace..."
+        quickCmdProc.command = ["/home/jeffy/.local/bin/milo-open", appQuery]
+        quickCmdProc.running = true
+        chatAutoDismissTimer.restart()
+        return
+      }
+    }
+
     // 0. Codebase Forensic Audit Intent Detection (Natural Language)
     if (lower === "audit" || lower === "/audit" || lower.startsWith("/audit ") ||
         lower === "audit codebase" || lower === "audit yourself" || lower === "scan codebase" ||
@@ -1405,6 +1431,11 @@ Item {
 
     function wish(wishPrompt: string): string {
       root.executeDesktopCommand("/wish " + (wishPrompt || ""))
+      return "ok"
+    }
+
+    function openApp(appName: string): string {
+      root.executeDesktopCommand("open " + (appName || ""))
       return "ok"
     }
 

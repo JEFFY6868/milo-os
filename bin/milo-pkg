@@ -259,8 +259,13 @@ cmd_install() {
     if pacman -Qi "$target" >/dev/null 2>&1; then
         echo -e "${EMERALD}${BOLD}✔ SUCCESS: '${target}' has been installed successfully!${RESET}"
 
-        # Update desktop database if desktop entries were added
-        update-desktop-database "${HOME}/.local/share/applications" 2>/dev/null || true
+        # Update desktop database and index newly installed applications
+        if [ -x "${HOME}/.local/bin/milo-open" ]; then
+            "${HOME}/.local/bin/milo-open" --sync 2>/dev/null || true
+        else
+            update-desktop-database "${HOME}/.local/share/applications" 2>/dev/null || true
+        fi
+        sudo update-desktop-database /usr/share/applications 2>/dev/null || true
 
         # Execute application-specific hooks if present
         if [ -x "/usr/bin/omarchy-restart-${target}" ]; then

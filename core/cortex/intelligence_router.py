@@ -1123,6 +1123,41 @@ def handle_datetime_intent(prompt: str) -> Optional[Tuple[str, str]]:
     return msg, "Milo Chronometer"
 
 
+def handle_app_intent(prompt: str) -> Optional[Tuple[str, str]]:
+    """Detects application launch or window focus intent and delegates to milo-open."""
+    p_lower = prompt.lower().strip()
+    # Guard against queries handled by dedicated intent modules
+    if any(p_lower.startswith(x) for x in ["open wa", "open whatsapp", "open mail", "open gmail", "open inbox", "open calendar", "open music"]):
+        return None
+
+    patterns = [
+        r"^(?:milo\s+)?(?:open|launch|start|run|switch\s+to)\s+(?:the\s+)?([a-zA-Z0-9_\-\.\s]+?)(?:\s+app|\s+application|\s+for\s+me|\s+please)?$",
+        r"^(?:can\s+(?:you|u)|could\s+you|please)\s+(?:open|launch|start|run)\s+(?:the\s+)?([a-zA-Z0-9_\-\.\s]+?)(?:\s+app|\s+for\s+me|\s+please)?$",
+    ]
+
+    for pat in patterns:
+        m = re.match(pat, p_lower)
+        if m:
+            app_target = m.group(1).strip()
+            if not app_target or len(app_target) > 30 or any(w in app_target for w in ["file", "directory", "folder", "link", "url"]):
+                continue
+            milo_open_bin = Path.home() / ".local/bin/milo-open"
+            if milo_open_bin.exists():
+                try:
+                    res = subprocess.run([str(milo_open_bin), app_target], capture_output=True, text=True, timeout=5)
+                    if res.returncode == 0:
+                        out_line = res.stdout.strip()
+                        clean_out = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", out_line)
+                        return f"✔ {clean_out or f'Opened {app_target.title()}.'}", "🚀 Milo App Dispatcher"
+                    else:
+                        err_line = res.stderr.strip() or res.stdout.strip()
+                        clean_err = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", err_line)
+                        return f"Could not launch '{app_target}': {clean_err}", "🚀 Milo App Dispatcher"
+                except Exception as e:
+                    return f"Error launching {app_target}: {e}", "🚀 Milo App Dispatcher"
+    return None
+
+
 def execute_hybrid_query(prompt: str) -> Tuple[str, str]:
     """
     Execute query using current intelligence mode and automatic failover.
@@ -1132,6 +1167,11 @@ def execute_hybrid_query(prompt: str) -> Tuple[str, str]:
     dt_res = handle_datetime_intent(prompt)
     if dt_res:
         return dt_res
+
+    # 0.05 Check app launch intent
+    app_res = handle_app_intent(prompt)
+    if app_res:
+        return app_res
 
     # 0.1 Check package manager intent
     pkg_res = handle_pkg_intent(prompt)

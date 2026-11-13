@@ -17,6 +17,10 @@ case "$CMD" in
     shift
     exec ${HOME}/.local/bin/milo-evolve audit "$@"
     ;;
+  open|launch|start|run|app)
+    shift
+    exec ${HOME}/.local/bin/milo-open "$@"
+    ;;
   install)
     shift
     exec ${HOME}/.local/bin/milo-pkg install "$@"

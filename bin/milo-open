@@ -1,0 +1,394 @@
+#!/usr/bin/env python3
+"""
+Milo OS — Unified Application Launcher & Window Focus Engine (milo-open)
+Seamless Application Resolution, Hyprland Workspace Focusing, and Desktop Database Indexing.
+Part of MiloOS. Built for Arch Linux & Hyprland.
+"""
+
+import os
+import sys
+import re
+import json
+import shlex
+import shutil
+import socket
+import subprocess
+from pathlib import Path
+from typing import Dict, Any, List, Optional, Tuple
+
+APP_DIRS = [
+    Path.home() / ".local/share/applications",
+    Path("/usr/share/applications"),
+    Path("/usr/local/share/applications"),
+]
+
+RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+
+# Canonical alias mapping for common user phrases to application binaries or desktop files
+APP_ALIASES: Dict[str, List[str]] = {
+    "browser": ["chromium", "firefox", "google-chrome-stable", "google-chrome"],
+    "chrome": ["chromium", "google-chrome-stable", "google-chrome"],
+    "chromium": ["chromium"],
+    "firefox": ["firefox"],
+    "web": ["chromium", "firefox"],
+    "internet": ["chromium", "firefox"],
+    "telegram": ["org.telegram.desktop", "telegram-desktop", "telegram"],
+    "tg": ["org.telegram.desktop", "telegram-desktop"],
+    "discord": ["discord", "webcord", "vesktop"],
+    "foot": ["foot"],
+    "terminal": ["foot", "alacritty", "kitty"],
+    "console": ["foot"],
+    "term": ["foot"],
+    "files": ["org.gnome.Nautilus", "nautilus", "milo-files"],
+    "file manager": ["org.gnome.Nautilus", "nautilus", "milo-files"],
+    "explorer": ["org.gnome.Nautilus", "nautilus", "milo-files"],
+    "nautilus": ["org.gnome.Nautilus", "nautilus"],
+    "notes": ["obsidian", "milo-notes"],
+    "obsidian": ["obsidian"],
+    "vault": ["obsidian"],
+    "code": ["antigravity", "code", "codium", "vscodium", "nvim"],
+    "editor": ["antigravity", "code", "nvim"],
+    "ide": ["antigravity", "code"],
+    "antigravity": ["antigravity"],
+    "calc": ["omacalc", "gnome-calculator", "kcalc"],
+    "calculator": ["omacalc", "gnome-calculator", "kcalc"],
+    "music": ["io.bassi.Amberol", "amberol", "milo-music"],
+    "songs": ["io.bassi.Amberol", "amberol", "milo-music"],
+    "player": ["io.bassi.Amberol", "amberol", "celluloid", "mpv"],
+    "video": ["io.github.celluloid_player.Celluloid", "celluloid", "mpv"],
+    "camera": ["milo-look", "qv4l2"],
+    "cam": ["milo-look", "qv4l2"],
+    "webcam": ["milo-look"],
+    "look": ["milo-look"],
+    "calendar": ["milo-calendar", "org.gnome.Calendar"],
+    "tasks": ["milo-task"],
+    "todos": ["milo-task"],
+    "task": ["milo-task"],
+    "whatsapp": ["milo-wa"],
+    "wa": ["milo-wa"],
+    "torrent": ["org.qbittorrent.qBittorrent", "qbittorrent", "milo-torrent"],
+    "steam": ["steam"],
+    "games": ["steam"],
+    "monitor": ["btop", "milotop"],
+    "btop": ["btop"],
+    "settings": ["omarchy-menu toggle hardware", "systemsettings"],
+    "control": ["omarchy-menu toggle hardware"],
+}
+
+# Known Terminal/TUI applications that require a terminal window wrapper
+TUI_APPS = {
+    "btop", "htop", "top", "milotop", "yazi", "ranger", "nvim", "vim", "nano",
+    "cava", "pacman", "milo-calendar", "milo-pkg", "milo-doctor", "milo-help"
+}
+
+
+def notify(title: str, message: str, timeout_ms: int = 2500):
+    """Sends desktop notification and sound."""
+    try:
+        subprocess.run(["notify-send", "-a", "Milo OS", "-t", str(timeout_ms), title, message], check=False)
+    except Exception:
+        pass
+
+
+def speak_voice(text: str):
+    """Sends spoken text to Kokoro voice daemon."""
+    sock_path = RUNTIME_DIR / "milo-voice.sock"
+    if sock_path.exists():
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.settimeout(1.0)
+            s.connect(str(sock_path))
+            s.sendall(json.dumps({"action": "speak", "text": text}).encode("utf-8") + b"\n")
+            s.close()
+        except Exception:
+            pass
+
+
+def get_hyprland_clients() -> List[Dict[str, Any]]:
+    """Returns active window clients from Hyprland via hyprctl -j clients."""
+    try:
+        res = subprocess.run(["hyprctl", "-j", "clients"], capture_output=True, text=True, timeout=2)
+        if res.returncode == 0 and res.stdout.strip():
+            return json.loads(res.stdout)
+    except Exception:
+        pass
+    return []
+
+
+def focus_hyprland_workspace(ws_id: str) -> bool:
+    """Switches to the workspace of an already running window using Hyprland's Lua dispatcher."""
+    try:
+        cmd = ["hyprctl", "dispatch", f'hl.dsp.focus({{ workspace = "{ws_id}" }})']
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+        return res.returncode == 0
+    except Exception:
+        return False
+
+
+def find_running_window(query: str, clients: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Checks if an application matching query is already running."""
+    q = query.lower().strip()
+    candidates = APP_ALIASES.get(q, [q])
+
+    for client in clients:
+        c_class = str(client.get("class", "")).lower()
+        c_title = str(client.get("title", "")).lower()
+        c_initial = str(client.get("initialClass", "")).lower()
+
+        # Check exact and substring matches against aliases or query
+        for cand in candidates:
+            cand_l = cand.lower()
+            if cand_l in c_class or cand_l in c_initial:
+                return client
+            if len(cand_l) > 3 and cand_l in c_title:
+                return client
+
+    return None
+
+
+def get_installed_desktop_entries() -> Dict[str, Dict[str, str]]:
+    """Scans and indexes all installed .desktop files."""
+    entries: Dict[str, Dict[str, str]] = {}
+    for app_dir in APP_DIRS:
+        if not app_dir.exists():
+            continue
+        for f in app_dir.glob("*.desktop"):
+            desktop_id = f.stem
+            if desktop_id in entries:
+                continue
+            try:
+                content = f.read_text(encoding="utf-8", errors="ignore")
+                name = ""
+                exec_cmd = ""
+                generic_name = ""
+                comment = ""
+                no_display = False
+
+                for line in content.splitlines():
+                    line = line.strip()
+                    if line.startswith("Name=") and not name:
+                        name = line.split("=", 1)[1].strip()
+                    elif line.startswith("Exec=") and not exec_cmd:
+                        exec_cmd = line.split("=", 1)[1].strip()
+                    elif line.startswith("GenericName=") and not generic_name:
+                        generic_name = line.split("=", 1)[1].strip()
+                    elif line.startswith("Comment=") and not comment:
+                        comment = line.split("=", 1)[1].strip()
+                    elif line == "NoDisplay=true":
+                        no_display = True
+
+                if no_display:
+                    continue
+
+                if exec_cmd:
+                    # Clean %u, %U, %f, %F, %i, etc. from Exec string
+                    clean_exec = re.sub(r"%[a-zA-Z]", "", exec_cmd).strip()
+                    entries[desktop_id] = {
+                        "id": desktop_id,
+                        "file": str(f),
+                        "name": name or desktop_id,
+                        "exec": clean_exec,
+                        "generic": generic_name,
+                        "comment": comment,
+                    }
+            except Exception:
+                pass
+    return entries
+
+
+def sync_desktop_database():
+    """Generates desktop entries for local Milo utilities and runs update-desktop-database."""
+    local_apps = Path.home() / ".local/share/applications"
+    local_apps.mkdir(parents=True, exist_ok=True)
+    bin_dir = Path.home() / ".local/bin"
+
+    # Known Milo tools to ensure have .desktop files so they show in fuzzel (SUPER + R)
+    tools = [
+        ("milo-calendar", "Milo Calendar", "Native Terminal Calendar", "milo-calendar", "foot -a milo-floating -T 'Milo Calendar' -e milo-calendar", "Utility;Calendar;"),
+        ("milo-doctor", "Milo Doctor", "System Health & Diagnostics", "milo-doctor", "foot -a milo-floating -T 'Milo Doctor' -e milo-doctor", "System;Monitor;"),
+        ("milo-wa", "Milo WhatsApp", "Milo WhatsApp AI Gateway", "milo-wa", "foot -a milo-floating -T 'Milo WhatsApp' -e milo-wa", "Network;Chat;"),
+        ("milo-notes-cli", "Milo Notes", "Milo Markdown Vault Notes", "milo-notes-cli", "foot -a milo-floating -T 'Milo Notes' -e milo-notes-cli", "Office;TextEditor;"),
+        ("milo-music", "Milo Music", "AI Mood & Music Player", "milo-music", "milo-music play", "AudioVideo;Audio;Player;"),
+        ("milo-files", "Milo Files", "Milo Fast File Manager", "milo-files", "foot -a milo-floating -T 'Milo Files' -e milo-files", "System;FileManager;"),
+        ("milo-look", "Milo Look", "Webcam Optical Sensor", "milo-look", "milo-look", "Utility;"),
+        ("milo-snip", "Milo Snipping Tool", "Interactive Screen Region OCR & Capture", "milo-snip", "milo-snip --edit", "Utility;Graphics;"),
+        ("milo-task", "Milo Tasks", "Desktop Scratchpad & Todos", "milo-task", "foot -a milo-floating -T 'Milo Tasks' -e milo-task", "Office;ProjectManagement;"),
+    ]
+
+    created = 0
+    for file_id, name, comment, binary_name, exec_cmd, categories in tools:
+        if (bin_dir / binary_name).exists() or shutil.which(binary_name):
+            dfile = local_apps / f"{file_id}.desktop"
+            if not dfile.exists():
+                content = (
+                    "[Desktop Entry]\n"
+                    "Type=Application\n"
+                    f"Name={name}\n"
+                    f"Comment={comment}\n"
+                    f"Exec={exec_cmd}\n"
+                    "Icon=utilities-terminal\n"
+                    "Terminal=false\n"
+                    f"Categories={categories}\n"
+                )
+                dfile.write_text(content, encoding="utf-8")
+                created += 1
+
+    try:
+        subprocess.run(["update-desktop-database", str(local_apps)], capture_output=True, check=False)
+    except Exception:
+        pass
+
+    print(f"✔ Desktop database synchronized. ({created} entries registered in {local_apps})")
+
+
+def launch_application(query: str, force_new: bool = False) -> Tuple[bool, str]:
+    """Resolves and launches the requested application."""
+    clean_query = query.lower().strip()
+    if not clean_query:
+        return False, "Empty application name."
+
+    # Strip prefixes like "open", "launch", "start", "run"
+    clean_query = re.sub(r"^(?:open|launch|start|run|app)\s+", "", clean_query, flags=re.IGNORECASE).strip()
+    if not clean_query:
+        return False, "No target application specified."
+
+    # 1. Check if application is already open in Hyprland
+    if not force_new and clean_query not in ("terminal", "foot", "console"):
+        clients = get_hyprland_clients()
+        running_client = find_running_window(clean_query, clients)
+        if running_client:
+            ws_id = str(running_client.get("workspace", {}).get("id", ""))
+            c_title = running_client.get("title", clean_query)
+            c_class = running_client.get("class", clean_query)
+            if ws_id:
+                focus_hyprland_workspace(ws_id)
+                msg = f"Focused {c_class} on workspace {ws_id}."
+                notify("Milo App Switcher", f"✔ Switched to {c_class} on workspace {ws_id}.")
+                speak_voice(f"Switched to {clean_query} on workspace {ws_id}.")
+                return True, msg
+
+    # 2. Check canonical aliases
+    candidates = APP_ALIASES.get(clean_query, [clean_query])
+
+    # 3. Scan installed .desktop applications
+    desktop_entries = get_installed_desktop_entries()
+
+    # Match 3a: Exact desktop ID or Name match
+    matched_entry: Optional[Dict[str, str]] = None
+    for cand in candidates:
+        cand_l = cand.lower()
+        for d_id, entry in desktop_entries.items():
+            if d_id.lower() == cand_l or entry["name"].lower() == cand_l:
+                matched_entry = entry
+                break
+        if matched_entry:
+            break
+
+    # Match 3b: Substring or Generic Name match
+    if not matched_entry:
+        for cand in candidates:
+            cand_l = cand.lower()
+            for d_id, entry in desktop_entries.items():
+                if cand_l in d_id.lower() or cand_l in entry["name"].lower() or cand_l in entry["generic"].lower():
+                    matched_entry = entry
+                    break
+            if matched_entry:
+                break
+
+    # 4. If .desktop entry found, launch it
+    if matched_entry:
+        exec_cmd = matched_entry["exec"]
+        name = matched_entry["name"]
+        print(f"🚀 Launching {name} ({matched_entry['id']})...")
+        try:
+            # Check if this command needs a terminal wrapper
+            first_tok = exec_cmd.split()[0] if exec_cmd else ""
+            if Path(first_tok).name in TUI_APPS and not exec_cmd.startswith("foot"):
+                exec_cmd = f"foot -a milo-floating -T '{name}' -e {exec_cmd}"
+
+            subprocess.Popen(
+                exec_cmd,
+                shell=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
+            notify("Milo App Launcher", f"✔ Launching {name}...")
+            speak_voice(f"Opening {name}, sir.")
+            return True, f"Launched {name} via {matched_entry['id']}.desktop."
+        except Exception as e:
+            return False, f"Failed to launch {name}: {e}"
+
+    # 5. Check if it exists as a binary in PATH
+    for cand in candidates:
+        bin_path = shutil.which(cand)
+        if bin_path:
+            bin_name = Path(bin_path).name
+            print(f"🚀 Launching binary {bin_name} from {bin_path}...")
+            try:
+                if bin_name in TUI_APPS:
+                    run_cmd = ["foot", "-a", "milo-floating", "-T", f"MILO // {bin_name}", "-e", bin_path]
+                else:
+                    run_cmd = [bin_path]
+
+                subprocess.Popen(
+                    run_cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True
+                )
+                notify("Milo App Launcher", f"✔ Launching {bin_name}...")
+                speak_voice(f"Opening {bin_name}, sir.")
+                return True, f"Launched binary {bin_path}."
+            except Exception as e:
+                return False, f"Failed to execute binary {bin_path}: {e}"
+
+    # 6. Fallback: xdg-open or browser search if URL or unknown
+    if "." in clean_query and ("http" in clean_query or "/" in clean_query):
+        subprocess.Popen(["xdg-open", clean_query], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        return True, f"Opened URL {clean_query}."
+
+    return False, f"Application '{clean_query}' not found in installed desktop applications or PATH."
+
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help", "help"):
+        print("Milo OS — Unified Application Launcher (milo-open)")
+        print("Usage:")
+        print("  milo-open <app-name>        Launch app or focus if running")
+        print("  milo-open --new <app-name>  Force launching a new window")
+        print("  milo-open --sync            Sync desktop files and refresh app index")
+        print("  milo-open --list            List all available indexed applications")
+        sys.exit(0)
+
+    arg = sys.argv[1]
+
+    if arg == "--sync":
+        sync_desktop_database()
+        sys.exit(0)
+
+    if arg == "--list":
+        entries = get_installed_desktop_entries()
+        print(f"✦ Indexed Applications ({len(entries)}):")
+        for d_id, e in sorted(entries.items()):
+            print(f"  • {e['name']:<28} [{d_id}] -> {e['exec'][:45]}")
+        sys.exit(0)
+
+    force_new = False
+    query_parts = sys.argv[1:]
+    if query_parts[0] == "--new":
+        force_new = True
+        query_parts = query_parts[1:]
+
+    query = " ".join(query_parts)
+    ok, msg = launch_application(query, force_new=force_new)
+    if ok:
+        print(f"\033[1;32m✔ {msg}\033[0m")
+        sys.exit(0)
+    else:
+        print(f"\033[1;31m✘ {msg}\033[0m")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
