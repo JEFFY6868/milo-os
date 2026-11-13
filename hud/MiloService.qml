@@ -76,12 +76,13 @@ Item {
   // Dynamic Persistent Milo Scratchpad & Calendar
   property bool scratchpadModalOpen: false
   property string scratchpadFilter: "all"  // "all" | "pending" | "completed"
-  property string midLeftTab: "tasks"      // "tasks" | "agenda" | "mail"
+  property string midLeftTab: "tasks"      // "tasks" | "agenda" | "mail" | "whatsapp"
   property bool tasksWrapAll: false
   property bool modalTasksWrapAll: false
   property int expandedDeskTaskIndex: -1
   property int expandedModalTaskIndex: -1
   property var mailData: ({ "unread_count": 0, "emails": [] })
+  property var whatsappData: ({ "unread_count": 0, "status": "offline", "phone": "", "pushName": "", "chats": [] })
   property var agendaList: []
   property var worktimeData: ({
     start: "09:00",
@@ -142,6 +143,27 @@ Item {
   function mailOpenWeb() {
     if (quickCmdProc.running) quickCmdProc.running = false
     quickCmdProc.command = ["xdg-open", "https://mail.google.com"]
+    quickCmdProc.running = true
+  }
+
+  function whatsappSync() {
+    if (quickCmdProc.running) quickCmdProc.running = false
+    quickCmdProc.command = [root.homeDir + "/.local/bin/milo-wa", "sync"]
+    quickCmdProc.running = true
+  }
+
+  function whatsappSummarize() {
+    quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // WhatsApp AI Briefing", root.homeDir + "/.local/bin/milo-wa", "summarize"]
+    quickCmdProc.running = true
+  }
+
+  function whatsappReadChat(target) {
+    quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // WhatsApp Thread", root.homeDir + "/.local/bin/milo-wa", "read", target.toString()]
+    quickCmdProc.running = true
+  }
+
+  function whatsappLinkQR() {
+    quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // WhatsApp QR Link", root.homeDir + "/.local/bin/milo-wa", "qr"]
     quickCmdProc.running = true
   }
 
@@ -320,6 +342,38 @@ Item {
     }
   }
 
+  FileView {
+    id: whatsappFile
+    path: root.homeDir + "/.local/share/milo/whatsapp/inbox.json"
+    watchChanges: true
+    printErrors: false
+    onLoaded: {
+      try {
+        var raw = text().trim()
+        if (raw) {
+          var wd = JSON.parse(raw)
+          if (wd && typeof wd === 'object') root.whatsappData = wd
+        }
+      } catch(e) {}
+    }
+  }
+
+  FileView {
+    id: whatsappTriggerWatcher
+    path: "/tmp/milo-whatsapp-trigger"
+    watchChanges: true
+    printErrors: false
+    onLoaded: {
+      try {
+        var rawW = whatsappFile.text().trim()
+        if (rawW) {
+          var wObj = JSON.parse(rawW)
+          if (wObj && typeof wObj === 'object') root.whatsappData = wObj
+        }
+      } catch(e) {}
+    }
+  }
+
   // Milo Scratchpad Modal External IPC Trigger
   FileView {
     id: scratchpadTriggerWatcher
@@ -354,6 +408,9 @@ Item {
           } else if (act === "open_mail") {
             root.midLeftTab = "mail"
             root.scratchpadModalOpen = true
+          } else if (act === "open_whatsapp" || act === "open_wa") {
+            root.midLeftTab = "whatsapp"
+            root.scratchpadModalOpen = true
           } else if (act === "update" || act === "update_agenda") {
             // Trigger todos reload from disk
             var rawJson = todosFile.text().trim()
@@ -375,6 +432,11 @@ Item {
             if (rawMail) {
               var mObj = JSON.parse(rawMail)
               if (mObj && typeof mObj === 'object') root.mailData = mObj
+            }
+            var rawWa = whatsappFile.text().trim()
+            if (rawWa) {
+              var wObj = JSON.parse(rawWa)
+              if (wObj && typeof wObj === 'object') root.whatsappData = wObj
             }
           }
         }
@@ -2292,10 +2354,10 @@ Item {
         id: scratchpadCard
         x: 35
         anchors.verticalCenter: parent.verticalCenter
-        width: 235; height: 245
+        width: 255; height: 245
         radius: 14
         color: Qt.rgba(0.06, 0.01, 0.02, 0.85)
-        border.color: root.midLeftTab === "mail" ? Qt.rgba(1.0, 0.67, 0.0, 0.45) : (root.midLeftTab === "agenda" ? Qt.rgba(0, 0.9, 1.0, 0.4) : Qt.rgba(1.0, 0.03, 0.22, 0.45))
+        border.color: root.midLeftTab === "whatsapp" ? Qt.rgba(0.15, 0.83, 0.40, 0.45) : (root.midLeftTab === "mail" ? Qt.rgba(1.0, 0.67, 0.0, 0.45) : (root.midLeftTab === "agenda" ? Qt.rgba(0, 0.9, 1.0, 0.4) : Qt.rgba(1.0, 0.03, 0.22, 0.45)))
         border.width: 1.2
 
         ColumnLayout {
@@ -2303,7 +2365,7 @@ Item {
           anchors.margins: 10
           spacing: 6
 
-          // Header: Tri-Tab Switcher & Stats
+          // Header: Quad-Tab Switcher & Stats
           RowLayout {
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignTop
@@ -2396,12 +2458,41 @@ Item {
               }
             }
 
+            // WhatsApp Tab Button in HUD Header
+            Rectangle {
+              height: 20
+              width: hudWaLabel.implicitWidth + 10
+              radius: 4
+              color: root.midLeftTab === "whatsapp" ? "#25d366" : (root.whatsappData && root.whatsappData.unread_count > 0 ? Qt.rgba(0.15, 0.83, 0.40, 0.25) : Qt.rgba(1, 1, 1, 0.08))
+              border.color: root.midLeftTab === "whatsapp" ? "#ffffff" : (root.whatsappData && root.whatsappData.unread_count > 0 ? "#25d366" : Qt.rgba(1, 1, 1, 0.2))
+              border.width: 1
+
+              Text {
+                id: hudWaLabel
+                anchors.centerIn: parent
+                text: root.whatsappData && root.whatsappData.unread_count > 0 ? ("💬 " + root.whatsappData.unread_count) : "💬 WA"
+                color: root.midLeftTab === "whatsapp" ? "#060102" : (root.whatsappData && root.whatsappData.unread_count > 0 ? "#25d366" : Qt.rgba(1, 1, 1, 0.45))
+                font.pixelSize: 8
+                font.bold: true
+                font.family: "monospace"
+              }
+
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                  root.midLeftTab = "whatsapp"
+                  deskWaFocusScope.forceActiveFocus()
+                }
+              }
+            }
+
             Item { Layout.fillWidth: true }
 
             // Expand Modal Button
             Text {
               text: "⛶"
-              color: root.midLeftTab === "mail" ? "#ffaa00" : (root.midLeftTab === "agenda" ? "#00f0ff" : "#ff2a55")
+              color: root.midLeftTab === "whatsapp" ? "#25d366" : (root.midLeftTab === "mail" ? "#ffaa00" : (root.midLeftTab === "agenda" ? "#00f0ff" : "#ff2a55"))
               font.pixelSize: 11
               MouseArea {
                 anchors.fill: parent
@@ -2421,11 +2512,13 @@ Item {
                   return doneCount + "/" + root.todosList.length + " DONE"
                 } else if (root.midLeftTab === "agenda") {
                   return root.agendaList.length + " TODAY"
-                } else {
+                } else if (root.midLeftTab === "mail") {
                   return (root.mailData && root.mailData.unread_count ? root.mailData.unread_count : 0) + " UNREAD"
+                } else {
+                  return (root.whatsappData && root.whatsappData.unread_count ? root.whatsappData.unread_count : 0) + " UNREAD"
                 }
               }
-              color: root.midLeftTab === "mail" ? "#ffaa00" : (root.midLeftTab === "agenda" ? Qt.rgba(0, 0.9, 1.0, 0.7) : Qt.rgba(1, 1, 1, 0.5))
+              color: root.midLeftTab === "whatsapp" ? "#25d366" : (root.midLeftTab === "mail" ? "#ffaa00" : (root.midLeftTab === "agenda" ? Qt.rgba(0, 0.9, 1.0, 0.7) : Qt.rgba(1, 1, 1, 0.5)))
               font.pixelSize: 8
               font.family: "monospace"
               MouseArea {
@@ -2582,6 +2675,53 @@ Item {
                   anchors.fill: parent
                   cursorShape: Qt.PointingHandCursor
                   onClicked: root.mailSync()
+                }
+              }
+            }
+          }
+
+          // WhatsApp Mini-Toolbar (Desktop HUD - WhatsApp Tab)
+          Rectangle {
+            Layout.fillWidth: true
+            height: 18
+            radius: 4
+            visible: root.midLeftTab === "whatsapp"
+            color: Qt.rgba(0.02, 0.12, 0.06, 0.5)
+            border.color: Qt.rgba(0.15, 0.83, 0.40, 0.25)
+            border.width: 1
+
+            RowLayout {
+              anchors.fill: parent
+              anchors.leftMargin: 6
+              anchors.rightMargin: 6
+              spacing: 6
+
+              Text {
+                text: "💬 WHATSAPP"
+                color: "#25d366"
+                font.pixelSize: 8
+                font.bold: true
+                font.family: "monospace"
+              }
+
+              Item { Layout.fillWidth: true }
+
+              Text {
+                text: root.whatsappData && root.whatsappData.phone ? (root.whatsappData.pushName ? root.whatsappData.pushName : root.whatsappData.phone) : (root.whatsappData && root.whatsappData.status === "ready" ? "Ready" : "Offline")
+                color: root.whatsappData && (root.whatsappData.status === "ready" || root.whatsappData.phone) ? "#25d366" : Qt.rgba(1, 1, 1, 0.45)
+                font.pixelSize: 7
+                font.family: "monospace"
+                elide: Text.ElideRight
+                Layout.maximumWidth: 90
+              }
+
+              Text {
+                text: "🔄"
+                font.pixelSize: 8
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.whatsappSync()
                 }
               }
             }
@@ -2930,6 +3070,136 @@ Item {
           }
 
           // ------------------------------------------------------------------
+          // VIEW 4: WHATSAPP CHATS LIST (visible when midLeftTab === "whatsapp")
+          // ------------------------------------------------------------------
+          ScrollView {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            clip: true
+            visible: root.midLeftTab === "whatsapp"
+
+            ColumnLayout {
+              width: scratchpadCard.width - 20
+              spacing: 4
+
+              // Empty or Not Linked State
+              Item {
+                Layout.fillWidth: true
+                height: 54
+                visible: !root.whatsappData || !root.whatsappData.chats || root.whatsappData.chats.length === 0
+
+                Rectangle {
+                  anchors.fill: parent
+                  radius: 5
+                  color: Qt.rgba(0.02, 0.08, 0.04, 0.55)
+                  border.color: Qt.rgba(0.15, 0.83, 0.40, 0.3)
+                  border.width: 1
+
+                  ColumnLayout {
+                    anchors.centerIn: parent
+                    spacing: 2
+                    Text {
+                      Layout.alignment: Qt.AlignHCenter
+                      text: "💬 NO ACTIVE CHATS"
+                      color: "#25d366"
+                      font.pixelSize: 8
+                      font.bold: true
+                      font.family: "monospace"
+                    }
+                    Text {
+                      Layout.alignment: Qt.AlignHCenter
+                      text: "Run 'milo wa qr' to link device"
+                      color: Qt.rgba(1, 1, 1, 0.45)
+                      font.pixelSize: 7
+                      font.family: "system-ui, sans-serif"
+                    }
+                  }
+                }
+              }
+
+              // WhatsApp Chat Cards Repeater (Desktop HUD)
+              Repeater {
+                model: root.whatsappData && root.whatsappData.chats ? root.whatsappData.chats : []
+                delegate: Rectangle {
+                  id: deskWaRow
+                  required property var modelData
+                  required property int index
+                  Layout.fillWidth: true
+                  height: 36
+                  radius: 5
+                  color: Qt.rgba(0.02, 0.10, 0.05, 0.70)
+                  border.color: modelData.unread > 0 ? "#25d366" : Qt.rgba(0.15, 0.83, 0.40, 0.25)
+                  border.width: modelData.unread > 0 ? 1.5 : 1
+
+                  ColumnLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 6; anchors.rightMargin: 6
+                    anchors.topMargin: 3; anchors.bottomMargin: 3
+                    spacing: 1
+
+                    RowLayout {
+                      Layout.fillWidth: true
+                      spacing: 4
+
+                      Text {
+                        text: (modelData.is_group ? "👥 " : "👤 ") + (modelData.name || "Unknown")
+                        color: modelData.unread > 0 ? "#25d366" : "#a8f5c8"
+                        font.pixelSize: 8
+                        font.bold: true
+                        font.family: "system-ui, sans-serif"
+                        elide: Text.ElideRight
+                        Layout.maximumWidth: 135
+                      }
+
+                      Item { Layout.fillWidth: true }
+
+                      // Unread badge
+                      Rectangle {
+                        height: 12
+                        width: unreadWaBadgeText.implicitWidth + 6
+                        radius: 3
+                        color: "#25d366"
+                        visible: modelData.unread > 0
+                        Text {
+                          id: unreadWaBadgeText
+                          anchors.centerIn: parent
+                          text: modelData.unread ? modelData.unread.toString() : ""
+                          color: "#060102"
+                          font.pixelSize: 7
+                          font.bold: true
+                          font.family: "monospace"
+                        }
+                      }
+
+                      Text {
+                        text: modelData.time || ""
+                        color: Qt.rgba(1, 1, 1, 0.40)
+                        font.pixelSize: 7
+                        font.family: "monospace"
+                      }
+                    }
+
+                    Text {
+                      Layout.fillWidth: true
+                      text: modelData.snippet || "(No message content)"
+                      color: "#ffffff"
+                      font.pixelSize: 8
+                      font.family: "system-ui, sans-serif"
+                      elide: Text.ElideRight
+                    }
+                  }
+
+                  MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.whatsappReadChat(modelData.index || (index + 1))
+                  }
+                }
+              }
+            }
+          }
+
+          // ------------------------------------------------------------------
           // INPUT 1: Add Task Row (visible when midLeftTab === "tasks")
           // ------------------------------------------------------------------
           Rectangle {
@@ -2987,8 +3257,8 @@ Item {
                   } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
                     var isBack = (event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier))
                     if (isBack) {
-                      root.midLeftTab = "mail"
-                      deskMailFocusScope.forceActiveFocus()
+                      root.midLeftTab = "whatsapp"
+                      deskWaFocusScope.forceActiveFocus()
                     } else {
                       root.midLeftTab = "agenda"
                       deskAgendaInput.forceActiveFocus()
@@ -3114,8 +3384,8 @@ Item {
                   root.midLeftTab = "agenda"
                   deskAgendaInput.forceActiveFocus()
                 } else {
-                  root.midLeftTab = "tasks"
-                  deskTaskInput.forceActiveFocus()
+                  root.midLeftTab = "whatsapp"
+                  deskWaFocusScope.forceActiveFocus()
                 }
                 event.accepted = true
               } else if (event.key === Qt.Key_Escape) {
@@ -3194,6 +3464,115 @@ Item {
                   anchors.fill: parent
                   cursorShape: Qt.PointingHandCursor
                   onClicked: root.mailOpenWeb()
+                }
+              }
+            }
+          }
+
+          // ------------------------------------------------------------------
+          // INPUT 4: Quick Action Strip & WhatsApp Focus Scope (visible when midLeftTab === "whatsapp")
+          // ------------------------------------------------------------------
+          Rectangle {
+            id: deskWaFocusScope
+            Layout.fillWidth: true
+            height: 24; radius: 5
+            color: activeFocus ? Qt.rgba(0.04, 0.16, 0.08, 0.95) : Qt.rgba(0.02, 0.10, 0.05, 0.85)
+            border.color: activeFocus ? "#25d366" : Qt.rgba(0.15, 0.83, 0.40, 0.4)
+            border.width: activeFocus ? 1.5 : 1
+            visible: root.midLeftTab === "whatsapp"
+            focus: root.midLeftTab === "whatsapp"
+
+            Keys.priority: Keys.BeforeItem
+            Keys.onPressed: function(event) {
+              if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+                var isBack = (event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier))
+                if (isBack) {
+                  root.midLeftTab = "mail"
+                  deskMailFocusScope.forceActiveFocus()
+                } else {
+                  root.midLeftTab = "tasks"
+                  deskTaskInput.forceActiveFocus()
+                }
+                event.accepted = true
+              } else if (event.key === Qt.Key_Escape) {
+                deskWaFocusScope.focus = false
+                event.accepted = true
+              } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                root.whatsappSummarize()
+                event.accepted = true
+              } else if (event.key === Qt.Key_R && (event.modifiers & Qt.ControlModifier)) {
+                root.whatsappSync()
+                event.accepted = true
+              }
+            }
+
+            RowLayout {
+              anchors.fill: parent
+              anchors.leftMargin: 6; anchors.rightMargin: 6
+              spacing: 5
+
+              // 🎙 AI Briefing Button
+              Rectangle {
+                Layout.fillWidth: true
+                height: 18; radius: 3
+                color: Qt.rgba(0.15, 0.83, 0.40, 0.15)
+                border.color: Qt.rgba(0.15, 0.83, 0.40, 0.3)
+                border.width: 1
+                RowLayout {
+                  anchors.centerIn: parent
+                  spacing: 3
+                  Text { text: "🎙"; font.pixelSize: 8 }
+                  Text {
+                    text: "AI BRIEF"
+                    color: "#25d366"
+                    font.pixelSize: 8
+                    font.bold: true
+                    font.family: "monospace"
+                  }
+                }
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.whatsappSummarize()
+                }
+              }
+
+              // 📱 QR Link Button
+              Rectangle {
+                width: 48; height: 18; radius: 3
+                color: Qt.rgba(1, 1, 1, 0.06)
+                border.color: Qt.rgba(1, 1, 1, 0.15)
+                border.width: 1
+                Text {
+                  anchors.centerIn: parent
+                  text: "📱 QR"
+                  color: Qt.rgba(1, 1, 1, 0.7)
+                  font.pixelSize: 8
+                  font.family: "monospace"
+                }
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.whatsappLinkQR()
+                }
+              }
+
+              // 🔄 Sync Button
+              Rectangle {
+                width: 22; height: 18; radius: 3
+                color: Qt.rgba(1, 1, 1, 0.06)
+                border.color: Qt.rgba(1, 1, 1, 0.15)
+                border.width: 1
+                Text {
+                  anchors.centerIn: parent
+                  text: "🔄"
+                  color: "#ffffff"
+                  font.pixelSize: 8
+                }
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.whatsappSync()
                 }
               }
             }
@@ -4816,8 +5195,10 @@ Item {
             modalTaskInput.forceActiveFocus()
           } else if (root.midLeftTab === "agenda") {
             modalAgendaInput.forceActiveFocus()
-          } else {
+          } else if (root.midLeftTab === "mail") {
             modalMailFocusScope.forceActiveFocus()
+          } else {
+            modalWaFocusScope.forceActiveFocus()
           }
         }
       }
@@ -4847,8 +5228,8 @@ Item {
             var isBack = (event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier))
             if (root.midLeftTab === "tasks") {
               if (isBack) {
-                root.midLeftTab = "mail"
-                modalMailFocusScope.forceActiveFocus()
+                root.midLeftTab = "whatsapp"
+                modalWaFocusScope.forceActiveFocus()
               } else {
                 root.midLeftTab = "agenda"
                 modalAgendaInput.forceActiveFocus()
@@ -4861,10 +5242,18 @@ Item {
                 root.midLeftTab = "mail"
                 modalMailFocusScope.forceActiveFocus()
               }
-            } else { // "mail"
+            } else if (root.midLeftTab === "mail") {
               if (isBack) {
                 root.midLeftTab = "agenda"
                 modalAgendaInput.forceActiveFocus()
+              } else {
+                root.midLeftTab = "whatsapp"
+                modalWaFocusScope.forceActiveFocus()
+              }
+            } else { // "whatsapp"
+              if (isBack) {
+                root.midLeftTab = "mail"
+                modalMailFocusScope.forceActiveFocus()
               } else {
                 root.midLeftTab = "tasks"
                 modalTaskInput.forceActiveFocus()
@@ -5001,6 +5390,54 @@ Item {
                   }
                 }
               }
+
+              // WhatsApp Tab Button (Modal)
+              Rectangle {
+                height: 26
+                width: modalWaTabLabel.implicitWidth + (root.whatsappData && root.whatsappData.unread_count > 0 ? 34 : 16)
+                radius: 5
+                color: root.midLeftTab === "whatsapp" ? "#25d366" : Qt.rgba(0.15, 0.83, 0.40, 0.15)
+                border.color: root.midLeftTab === "whatsapp" ? "#ffffff" : Qt.rgba(0.15, 0.83, 0.40, 0.4)
+                border.width: 1
+
+                RowLayout {
+                  anchors.centerIn: parent
+                  spacing: 5
+                  Text {
+                    id: modalWaTabLabel
+                    text: "💬 WHATSAPP"
+                    color: root.midLeftTab === "whatsapp" ? "#060102" : "#25d366"
+                    font.pixelSize: 11
+                    font.bold: true
+                    font.family: "monospace"
+                  }
+                  Rectangle {
+                    visible: root.whatsappData && root.whatsappData.unread_count > 0
+                    height: 14
+                    width: waBadgeNum.implicitWidth + 6
+                    radius: 7
+                    color: "#ff0838"
+                    Text {
+                      id: waBadgeNum
+                      anchors.centerIn: parent
+                      text: root.whatsappData && root.whatsappData.unread_count ? root.whatsappData.unread_count.toString() : "0"
+                      color: "#ffffff"
+                      font.pixelSize: 8
+                      font.bold: true
+                      font.family: "monospace"
+                    }
+                  }
+                }
+
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: {
+                    root.midLeftTab = "whatsapp"
+                    modalWaFocusScope.forceActiveFocus()
+                  }
+                }
+              }
             }
 
             Item { Layout.fillWidth: true }
@@ -5010,14 +5447,16 @@ Item {
               height: 24
               width: counterText.implicitWidth + 16
               radius: 5
-              color: root.midLeftTab === "mail" ? Qt.rgba(1.0, 0.67, 0.0, 0.2) : (root.midLeftTab === "agenda" ? Qt.rgba(0, 0.9, 1.0, 0.2) : Qt.rgba(1, 0.03, 0.22, 0.2))
-              border.color: root.midLeftTab === "mail" ? Qt.rgba(1.0, 0.67, 0.0, 0.5) : (root.midLeftTab === "agenda" ? Qt.rgba(0, 0.9, 1.0, 0.5) : Qt.rgba(1, 0.03, 0.22, 0.5))
+              color: root.midLeftTab === "whatsapp" ? Qt.rgba(0.15, 0.83, 0.40, 0.2) : (root.midLeftTab === "mail" ? Qt.rgba(1.0, 0.67, 0.0, 0.2) : (root.midLeftTab === "agenda" ? Qt.rgba(0, 0.9, 1.0, 0.2) : Qt.rgba(1, 0.03, 0.22, 0.2)))
+              border.color: root.midLeftTab === "whatsapp" ? Qt.rgba(0.15, 0.83, 0.40, 0.5) : (root.midLeftTab === "mail" ? Qt.rgba(1.0, 0.67, 0.0, 0.5) : (root.midLeftTab === "agenda" ? Qt.rgba(0, 0.9, 1.0, 0.5) : Qt.rgba(1, 0.03, 0.22, 0.5)))
               border.width: 1
               Text {
                 id: counterText
                 anchors.centerIn: parent
                 text: {
-                  if (root.midLeftTab === "mail") {
+                  if (root.midLeftTab === "whatsapp") {
+                    return (root.whatsappData && root.whatsappData.unread_count ? root.whatsappData.unread_count : 0) + " UNREAD"
+                  } else if (root.midLeftTab === "mail") {
                     return (root.mailData && root.mailData.unread_count ? root.mailData.unread_count : 0) + " UNREAD"
                   } else if (root.midLeftTab === "agenda") {
                     return root.agendaList.length + " EVENTS TODAY"
@@ -5025,7 +5464,7 @@ Item {
                     return root.countDoneTodos() + "/" + root.todosList.length + " COMPLETED"
                   }
                 }
-                color: root.midLeftTab === "mail" ? "#ffd480" : (root.midLeftTab === "agenda" ? "#80f5ff" : "#ff8899")
+                color: root.midLeftTab === "whatsapp" ? "#25d366" : (root.midLeftTab === "mail" ? "#ffd480" : (root.midLeftTab === "agenda" ? "#80f5ff" : "#ff8899"))
                 font.pixelSize: 10
                 font.bold: true
                 font.family: "monospace"
@@ -5035,8 +5474,8 @@ Item {
             // Close button
             Rectangle {
               width: 24; height: 24; radius: 5
-              color: root.midLeftTab === "mail" ? Qt.rgba(1.0, 0.67, 0.0, 0.2) : (root.midLeftTab === "agenda" ? Qt.rgba(0, 0.9, 1.0, 0.2) : Qt.rgba(1, 0.03, 0.22, 0.2))
-              border.color: root.midLeftTab === "mail" ? "#ffaa00" : (root.midLeftTab === "agenda" ? "#00f0ff" : "#ff0838")
+              color: root.midLeftTab === "whatsapp" ? Qt.rgba(0.15, 0.83, 0.40, 0.2) : (root.midLeftTab === "mail" ? Qt.rgba(1.0, 0.67, 0.0, 0.2) : (root.midLeftTab === "agenda" ? Qt.rgba(0, 0.9, 1.0, 0.2) : Qt.rgba(1, 0.03, 0.22, 0.2)))
+              border.color: root.midLeftTab === "whatsapp" ? "#25d366" : (root.midLeftTab === "mail" ? "#ffaa00" : (root.midLeftTab === "agenda" ? "#00f0ff" : "#ff0838"))
               border.width: 1
               Text {
                 anchors.centerIn: parent
@@ -6399,8 +6838,8 @@ Item {
                   root.midLeftTab = "agenda"
                   modalAgendaInput.forceActiveFocus()
                 } else {
-                  root.midLeftTab = "tasks"
-                  modalTaskInput.forceActiveFocus()
+                  root.midLeftTab = "whatsapp"
+                  modalWaFocusScope.forceActiveFocus()
                 }
                 event.accepted = true
               } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
@@ -6474,6 +6913,385 @@ Item {
               Text {
                 Layout.fillWidth: true
                 text: "Say: 'Milo, check my mail' or 'Milo, summarize my unread emails' for instant voice triage."
+                color: Qt.rgba(1, 1, 1, 0.5)
+                font.pixelSize: 9
+                font.family: "system-ui, sans-serif"
+                elide: Text.ElideRight
+              }
+            }
+          }
+
+          // ==================================================================
+          // MODAL VIEW 4: WHATSAPP CHATS (visible when midLeftTab === "whatsapp")
+          // ==================================================================
+          // 1. WhatsApp Action Bar
+          RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+            visible: root.midLeftTab === "whatsapp"
+
+            Rectangle {
+              height: 24
+              width: waUserBadge.implicitWidth + 14
+              radius: 4
+              color: Qt.rgba(0.15, 0.83, 0.40, 0.15)
+              border.color: Qt.rgba(0.15, 0.83, 0.40, 0.4)
+              border.width: 1
+
+              Text {
+                id: waUserBadge
+                anchors.centerIn: parent
+                text: root.whatsappData && root.whatsappData.phone ? ("● " + (root.whatsappData.pushName ? root.whatsappData.pushName + " (" + root.whatsappData.phone + ")" : root.whatsappData.phone)) : (root.whatsappData && root.whatsappData.status === "ready" ? "● Ready" : "⚠ WhatsApp Offline")
+                color: root.whatsappData && (root.whatsappData.status === "ready" || root.whatsappData.phone) ? "#25d366" : "#ff8899"
+                font.pixelSize: 10
+                font.bold: true
+                font.family: "monospace"
+              }
+            }
+
+            Item { Layout.fillWidth: true }
+
+            // Sync Button
+            Rectangle {
+              height: 24
+              width: waSyncLabel.implicitWidth + 14
+              radius: 4
+              color: Qt.rgba(0.08, 0.14, 0.2, 0.6)
+              border.color: Qt.rgba(0.15, 0.83, 0.40, 0.4)
+              border.width: 1
+
+              Text {
+                id: waSyncLabel
+                anchors.centerIn: parent
+                text: "🔄 Sync"
+                color: "#ffffff"
+                font.pixelSize: 9
+                font.family: "monospace"
+              }
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.whatsappSync()
+              }
+            }
+
+            // AI Briefing Button
+            Rectangle {
+              height: 24
+              width: waBriefLabel.implicitWidth + 14
+              radius: 4
+              color: Qt.rgba(0.15, 0.83, 0.40, 0.2)
+              border.color: "#25d366"
+              border.width: 1
+
+              Text {
+                id: waBriefLabel
+                anchors.centerIn: parent
+                text: "✦ AI Briefing"
+                color: "#25d366"
+                font.pixelSize: 9
+                font.bold: true
+                font.family: "monospace"
+              }
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.whatsappSummarize()
+              }
+            }
+
+            // Link QR Button
+            Rectangle {
+              height: 24
+              width: waQrLabel.implicitWidth + 14
+              radius: 4
+              color: Qt.rgba(0.04, 0.16, 0.08, 0.6)
+              border.color: Qt.rgba(0.15, 0.83, 0.40, 0.4)
+              border.width: 1
+
+              Text {
+                id: waQrLabel
+                anchors.centerIn: parent
+                text: "📱 Link Device"
+                color: Qt.rgba(1, 1, 1, 0.8)
+                font.pixelSize: 9
+                font.family: "monospace"
+              }
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.whatsappLinkQR()
+              }
+            }
+          }
+
+          // 2. WhatsApp List ScrollView
+          ScrollView {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            clip: true
+            visible: root.midLeftTab === "whatsapp"
+
+            ColumnLayout {
+              width: modalBox.width - 36
+              spacing: 6
+
+              // Empty or Not Linked State
+              Item {
+                Layout.fillWidth: true
+                height: 240
+                visible: !root.whatsappData || !root.whatsappData.chats || root.whatsappData.chats.length === 0
+
+                Rectangle {
+                  anchors.centerIn: parent
+                  width: Math.min(520, parent.width - 20)
+                  height: 220
+                  radius: 10
+                  color: Qt.rgba(0.02, 0.08, 0.04, 0.8)
+                  border.color: Qt.rgba(0.15, 0.83, 0.40, 0.4)
+                  border.width: 1.2
+
+                  ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 16
+                    spacing: 8
+
+                    Text {
+                      text: "💬 WHATSAPP LINK & SETUP"
+                      color: "#25d366"
+                      font.pixelSize: 13
+                      font.bold: true
+                      font.family: "monospace"
+                    }
+
+                    Text {
+                      Layout.fillWidth: true
+                      text: "Link your WhatsApp to Milo using Baileys QR Code:\n\n" +
+                            "1. Click [ 📱 Link Device ] above or run 'milo wa qr'\n" +
+                            "2. Open WhatsApp on your phone > Linked Devices > Link a Device\n" +
+                            "3. Scan the QR code displayed in the terminal\n" +
+                            "4. Milo will securely maintain your private AI chat assistant and inbox cache."
+                      color: Qt.rgba(1, 1, 1, 0.8)
+                      font.pixelSize: 10
+                      font.family: "system-ui, sans-serif"
+                      wrapMode: Text.Wrap
+                    }
+
+                    Item { Layout.fillHeight: true }
+
+                    RowLayout {
+                      spacing: 8
+                      Rectangle {
+                        height: 26
+                        width: waLinkBtnLabel.implicitWidth + 16
+                        radius: 4
+                        color: "#25d366"
+                        Text {
+                          id: waLinkBtnLabel
+                          anchors.centerIn: parent
+                          text: "📱 Link Device via QR"
+                          color: "#060102"
+                          font.pixelSize: 10
+                          font.bold: true
+                        }
+                        MouseArea {
+                          anchors.fill: parent
+                          cursorShape: Qt.PointingHandCursor
+                          onClicked: root.whatsappLinkQR()
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+
+              // WhatsApp Chat Cards Repeater
+              Repeater {
+                model: root.whatsappData && root.whatsappData.chats ? root.whatsappData.chats : []
+                delegate: Rectangle {
+                  required property var modelData
+                  required property int index
+                  Layout.fillWidth: true
+                  height: 56
+                  radius: 7
+                  color: Qt.rgba(0.02, 0.10, 0.05, 0.75)
+                  border.color: modelData.unread > 0 ? "#25d366" : Qt.rgba(0.15, 0.83, 0.40, 0.35)
+                  border.width: modelData.unread > 0 ? 1.5 : 1
+
+                  ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    spacing: 3
+
+                    RowLayout {
+                      Layout.fillWidth: true
+                      spacing: 6
+
+                      Text {
+                        text: modelData.is_group ? "👥" : "👤"
+                        color: "#25d366"
+                        font.pixelSize: 10
+                      }
+
+                      Text {
+                        text: modelData.name || "Unknown Contact"
+                        color: modelData.unread > 0 ? "#25d366" : "#a8f5c8"
+                        font.pixelSize: 10
+                        font.bold: true
+                        font.family: "system-ui, sans-serif"
+                        elide: Text.ElideRight
+                        Layout.maximumWidth: 220
+                      }
+
+                      Item { Layout.fillWidth: true }
+
+                      // Unread badge
+                      Rectangle {
+                        visible: modelData.unread > 0
+                        height: 14
+                        width: modalWaBadgeText.implicitWidth + 8
+                        radius: 3
+                        color: "#25d366"
+                        Text {
+                          id: modalWaBadgeText
+                          anchors.centerIn: parent
+                          text: modelData.unread ? (modelData.unread + " NEW") : ""
+                          color: "#060102"
+                          font.pixelSize: 8
+                          font.bold: true
+                          font.family: "monospace"
+                        }
+                      }
+
+                      Text {
+                        text: modelData.time || ""
+                        color: Qt.rgba(1, 1, 1, 0.45)
+                        font.pixelSize: 9
+                        font.family: "monospace"
+                      }
+                    }
+
+                    Text {
+                      Layout.fillWidth: true
+                      text: modelData.snippet || "(No message content)"
+                      color: "#ffffff"
+                      font.pixelSize: 9
+                      font.family: "system-ui, sans-serif"
+                      elide: Text.ElideRight
+                    }
+                  }
+
+                  MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.whatsappReadChat(modelData.index || (index + 1))
+                  }
+                }
+              }
+            }
+          }
+
+          // 3. Milo AI WhatsApp Copilot Strip & Modal WhatsApp Focus Scope
+          Rectangle {
+            id: modalWaFocusScope
+            Layout.fillWidth: true
+            height: 68
+            radius: 8
+            color: activeFocus ? Qt.rgba(0.04, 0.16, 0.08, 0.95) : Qt.rgba(0.02, 0.10, 0.05, 0.75)
+            border.color: activeFocus ? "#25d366" : Qt.rgba(0.15, 0.83, 0.40, 0.35)
+            border.width: activeFocus ? 1.5 : 1
+            visible: root.midLeftTab === "whatsapp"
+            focus: root.midLeftTab === "whatsapp"
+
+            Keys.priority: Keys.BeforeItem
+            Keys.onPressed: function(event) {
+              if (event.key === Qt.Key_Escape) {
+                root.scratchpadModalOpen = false
+                event.accepted = true
+              } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+                var isBack = (event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier))
+                if (isBack) {
+                  root.midLeftTab = "mail"
+                  modalMailFocusScope.forceActiveFocus()
+                } else {
+                  root.midLeftTab = "tasks"
+                  modalTaskInput.forceActiveFocus()
+                }
+                event.accepted = true
+              } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                root.whatsappSummarize()
+                event.accepted = true
+              } else if (event.key === Qt.Key_R && (event.modifiers & Qt.ControlModifier)) {
+                root.whatsappSync()
+                event.accepted = true
+              }
+            }
+
+            ColumnLayout {
+              anchors.fill: parent
+              anchors.margins: 6
+              spacing: 4
+
+              RowLayout {
+                Layout.fillWidth: true
+                spacing: 6
+
+                Text {
+                  text: "💬 MILO WHATSAPP COPILOT"
+                  color: "#25d366"
+                  font.pixelSize: 9
+                  font.bold: true
+                  font.family: "monospace"
+                }
+
+                Item { Layout.fillWidth: true }
+
+                Repeater {
+                  model: [
+                    { label: "🎙 AI Briefing", cmd: "summarize" },
+                    { label: "🔄 Sync Now", cmd: "sync" },
+                    { label: "📱 Link Device", cmd: "qr" },
+                    { label: "📋 Terminal List", cmd: "list" }
+                  ]
+                  delegate: Rectangle {
+                    required property var modelData
+                    height: 18
+                    width: chipWaText.implicitWidth + 10
+                    radius: 3
+                    color: Qt.rgba(0.15, 0.83, 0.40, 0.15)
+                    border.color: Qt.rgba(0.15, 0.83, 0.40, 0.4)
+                    border.width: 1
+                    Text {
+                      id: chipWaText
+                      anchors.centerIn: parent
+                      text: modelData.label
+                      color: "#25d366"
+                      font.pixelSize: 8
+                      font.family: "monospace"
+                    }
+                    MouseArea {
+                      anchors.fill: parent
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: {
+                        if (modelData.cmd === "summarize") {
+                          root.whatsappSummarize()
+                        } else if (modelData.cmd === "sync") {
+                          root.whatsappSync()
+                        } else if (modelData.cmd === "qr") {
+                          root.whatsappLinkQR()
+                        } else {
+                          quickCmdProc.command = ["foot", "-a", "milo-floating", "-T", "MILO // WhatsApp Inbox", root.homeDir + "/.local/bin/milo-wa", "list"]
+                          quickCmdProc.running = true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+
+              Text {
+                Layout.fillWidth: true
+                text: "Say: 'Milo, check WhatsApp' or 'Milo, summarize my WhatsApp' or 'Milo, send WhatsApp message to ...'"
                 color: Qt.rgba(1, 1, 1, 0.5)
                 font.pixelSize: 9
                 font.family: "system-ui, sans-serif"

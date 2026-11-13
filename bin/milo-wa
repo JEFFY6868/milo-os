@@ -1,6 +1,23 @@
 #!/usr/bin/env bash
-# Milo OpenWA WhatsApp Gateway CLI Interface
+# ==============================================================================
+# Milo Sovereign WhatsApp Gateway & Communication Suite
+# Part of MiloOS. Built for Arch Linux, Hyprland & Tactical Trinity HUD.
+# Local Baileys engine with zero cloud analytics, AI inbox summaries & HUD caching.
+# ==============================================================================
 set -eo pipefail
+
+# Resolve symlinks so REPO_DIR points to the actual milo-os root
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+if [ ! -d "${REPO_DIR}/core" ] && [ -d "${HOME}/Projects/milo-os/core" ]; then
+  REPO_DIR="${HOME}/Projects/milo-os"
+fi
 
 OPENWA_DIR="${HOME}/.local/share/milo/openwa"
 API_KEY_FILE="${OPENWA_DIR}/data/.api-key"
@@ -73,29 +90,100 @@ case "$CMD" in
     echo -e "  ${BOLD}Active Sessions:${RESET} ${SESSION_COUNT}"
 
     if [[ "$SESSION_COUNT" -gt 0 ]]; then
-      echo "$SESSIONS" | jq -r '.[] | "    • ID: \(.id)\n      Name: \(.name)\n      Status: \(.status)\n      Phone: \(.phone // "Not paired")"'
+      echo "$SESSIONS" | jq -r '.[] | "    • ID: \(.id)\n      Name: \(.name)\n      Status: \(.status)\n      Phone: \(.phone // "Not paired")\n      User: \(.pushName // "None")"'
     fi
     echo ""
     ;;
 
-  start)
-    systemctl --user start milo-openwa.service
-    echo -e "${GREEN}✦ Started milo-openwa.service${RESET}"
+  sync)
+    python3 -c "
+import sys
+sys.path.insert(0, '${REPO_DIR}')
+from core.whatsapp.engine import sync_inbox
+data = sync_inbox()
+print(f'${GREEN}✔ WhatsApp Synced:${RESET} {len(data[\"chats\"])} active threads, {data[\"unread_count\"]} unread messages.')
+"
     ;;
 
-  stop)
-    systemctl --user stop milo-openwa.service
-    echo -e "${YELLOW}✦ Stopped milo-openwa.service${RESET}"
+  list|ls|inbox)
+    python3 -c "
+import sys
+sys.path.insert(0, '${REPO_DIR}')
+from core.whatsapp.engine import get_inbox_data, format_terminal_list
+inbox = get_inbox_data(force_sync=True)
+print(format_terminal_list(inbox, unread_only=False))
+"
     ;;
 
-  restart)
-    systemctl --user restart milo-openwa.service
-    echo -e "${GREEN}✦ Restarted milo-openwa.service${RESET}"
+  unread)
+    python3 -c "
+import sys
+sys.path.insert(0, '${REPO_DIR}')
+from core.whatsapp.engine import get_inbox_data, format_terminal_list
+inbox = get_inbox_data(force_sync=True)
+print(format_terminal_list(inbox, unread_only=True))
+"
     ;;
 
-  dashboard|web)
-    echo -e "${CYAN}✦ Opening OpenWA Dashboard (${OPENWA_URL})...${RESET}"
-    xdg-open "${OPENWA_URL}" 2>/dev/null || true
+  read)
+    shift
+    TARGET="${1:-}"
+    if [[ -z "$TARGET" ]]; then
+      echo "Usage: milo wa read <index_number_or_contact_name>" >&2
+      exit 1
+    fi
+    python3 -c "
+import sys
+sys.path.insert(0, '${REPO_DIR}')
+from core.whatsapp.engine import read_chat
+print(read_chat('${TARGET}', limit=20))
+"
+    ;;
+
+  summary|summarize)
+    echo -e "${CYAN}✦ Analyzing incoming WhatsApp messages with Milo AI...${RESET}"
+    python3 -c "
+import sys
+sys.path.insert(0, '${REPO_DIR}')
+from core.whatsapp.engine import summarize_inbox
+print(summarize_inbox())
+"
+    ;;
+
+  send)
+    shift
+    RECIPIENT="${1:-}"
+    shift || true
+    MESSAGE="$*"
+
+    if [[ -z "$RECIPIENT" || -z "$MESSAGE" ]]; then
+      echo "Usage: milo wa send <contact_or_number> \"<message>\"" >&2
+      echo "Example: milo wa send \"Vaishnavi\" \"Hello from Milo!\"" >&2
+      echo "Example: milo wa send 919876543210 \"Hello from Milo!\"" >&2
+      exit 1
+    fi
+
+    python3 -c "
+import sys
+sys.path.insert(0, '${REPO_DIR}')
+from core.whatsapp.engine import send_whatsapp_message
+ok, res = send_whatsapp_message('${RECIPIENT}', '''${MESSAGE}''')
+if ok:
+    print(f'${GREEN}✔ Message Sent Successfully!${RESET} ID: {res}')
+else:
+    print(f'${RED}✖ Failed to send:${RESET} {res}')
+    sys.exit(1)
+"
+    ;;
+
+  notify)
+    shift
+    MESSAGE="$*"
+    if [[ -z "$MESSAGE" ]]; then
+      echo "Usage: milo wa notify \"<message>\"" >&2
+      exit 1
+    fi
+    "$0" send "919087876030@c.us" "$MESSAGE"
     ;;
 
   qr|pair)
@@ -119,7 +207,6 @@ case "$CMD" in
     echo -e "${CYAN}✦ Fetching Pairing QR Code...${RESET}"
     sleep 2
 
-    # Fetch QR data and decode
     python3 -c "
 import urllib.request, json, base64, os
 api_key = '$(get_api_key)'
@@ -159,54 +246,24 @@ except Exception as e:
     fi
     ;;
 
-  send)
-    shift
-    RECIPIENT="${1:-}"
-    shift || true
-    MESSAGE="$*"
-
-    if [[ -z "$RECIPIENT" || -z "$MESSAGE" ]]; then
-      echo "Usage: milo wa send <phone_number_or_chatId> \"<message>\"" >&2
-      echo "Example: milo wa send 919876543210 \"Hello from Milo!\"" >&2
-      exit 1
-    fi
-
-    # Format phone number if missing suffix
-    if [[ "$RECIPIENT" != *"@"* ]]; then
-      RECIPIENT="${RECIPIENT//[^0-9]/}@c.us"
-    fi
-
-    KEY=$(get_api_key)
-    SID=$(get_session_id)
-
-    if [[ -z "$SID" ]]; then
-      echo -e "${RED}Error: No active WhatsApp session found. Run 'milo wa qr' to pair first.${RESET}" >&2
-      exit 1
-    fi
-
-    echo -e "${CYAN}✦ Sending WhatsApp message to ${RECIPIENT}...${RESET}"
-    PAYLOAD=$(jq -n --arg chat "$RECIPIENT" --arg msg "$MESSAGE" '{chatId: $chat, text: $msg}')
-    RESP=$(curl -s -X POST "${OPENWA_URL}/api/sessions/${SID}/messages/send-text" \
-      -H "Content-Type: application/json" \
-      -H "X-API-Key: ${KEY}" \
-      -d "$PAYLOAD")
-
-    STATUS=$(echo "$RESP" | jq -r '.status // "ok"')
-    if [[ "$STATUS" == "ok" || "$RESP" == *"\"id\""* ]]; then
-      echo -e "${GREEN}✔ Message Sent Successfully!${RESET}"
-    else
-      echo -e "${RED}✖ Failed to send:${RESET} $RESP"
-    fi
+  dashboard|web)
+    echo -e "${CYAN}✦ Opening OpenWA Dashboard (${OPENWA_URL})...${RESET}"
+    xdg-open "${OPENWA_URL}" 2>/dev/null || true
     ;;
 
-  notify)
-    shift
-    MESSAGE="$*"
-    if [[ -z "$MESSAGE" ]]; then
-      echo "Usage: milo wa notify \"<message>\"" >&2
-      exit 1
-    fi
-    "$0" send "919087876030@c.us" "$MESSAGE"
+  start)
+    systemctl --user start milo-openwa.service
+    echo -e "${GREEN}✦ Started milo-openwa.service${RESET}"
+    ;;
+
+  stop)
+    systemctl --user stop milo-openwa.service
+    echo -e "${YELLOW}✦ Stopped milo-openwa.service${RESET}"
+    ;;
+
+  restart)
+    systemctl --user restart milo-openwa.service
+    echo -e "${GREEN}✦ Restarted milo-openwa.service${RESET}"
     ;;
 
   prune)
@@ -259,17 +316,20 @@ print(f"✔ Done. Size: {size_before:.2f} MB -> {size_after:.2f} MB (Saved {size
 
   *)
     cat <<EOF
-${BOLD}${CYAN}Milo WhatsApp Integration CLI (Powered by OpenWA Baileys)${RESET}
+${BOLD}${CYAN}Milo WhatsApp Sovereign Suite (Powered by OpenWA Baileys)${RESET}
 
 Usage:
+  milo wa list           Display recent active WhatsApp threads & unread counts
+  milo wa unread         Display only unread WhatsApp threads
+  milo wa read <num|id>  Read message history for a specific thread
+  milo wa summarize      AI executive briefing of recent messages (Groq / NVIDIA)
+  milo wa send <to> <msg> Send WhatsApp message to contact name or phone
+  milo wa sync           Sync active chats & messages to HUD cache
   milo wa status         Inspect OpenWA gateway status & session health
   milo wa qr             Display pairing QR code in terminal & save PNG
-  milo wa send <to> <msg> Send WhatsApp text message to contact or group
-  milo wa bridge         Start bidirectional webhook listener (phone <-> Milo brain)
   milo wa dashboard      Open OpenWA web management UI in browser (port 2785)
-  milo wa start          Start milo-openwa background service
-  milo wa stop           Stop milo-openwa background service
-  milo wa restart        Restart milo-openwa background service
+  milo wa bridge         Start bidirectional webhook listener (phone <-> Milo brain)
+  milo wa start|stop|restart Control background gateway service
 
 EOF
     ;;

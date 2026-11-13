@@ -903,6 +903,72 @@ def handle_mail_intent(prompt: str) -> Optional[Tuple[str, str]]:
     return None
 
 
+def handle_whatsapp_intent(prompt: str) -> Optional[Tuple[str, str]]:
+    """Intercept natural language WhatsApp queries & actions to query Milo WhatsApp."""
+    if prompt.startswith("You are Milo") or "system:" in prompt.lower() or len(prompt.split()) > 40:
+        return None
+
+    p = prompt.strip().lower()
+    milo_wa_bin = Path.home() / ".local" / "bin" / "milo-wa"
+    if not milo_wa_bin.exists():
+        milo_wa_bin = Path.home() / "Projects" / "milo-os" / "bin" / "milo-wa"
+    if not milo_wa_bin.exists():
+        return None
+
+    # 1. WhatsApp Summary / Briefing
+    if re.search(r'\b(?:summarize|brief\s+me\s+on|give\s+me\s+a\s+summary\s+of)\s+(?:my\s+)?(?:whatsapp|wa)\b', p) or \
+       re.search(r'\b(?:whatsapp|wa)\s+(?:summary|briefing)\b', p):
+        try:
+            res = subprocess.run([str(milo_wa_bin), "summarize"], capture_output=True, text=True, timeout=25)
+            if res.stdout.strip():
+                clean_out = re.sub(r'\x1b\[[0-9;]*m', '', res.stdout.strip())
+                return clean_out, "Milo WhatsApp Copilot"
+        except Exception:
+            pass
+
+    # 2. Read specific WhatsApp chat / message: "read whatsapp #X", "read whatsapp 1", "read whatsapp chat Vaishnavi"
+    read_match = re.search(r'\bread\s+(?:whatsapp|wa)(?:\s+(?:chat|message|thread))?\s+#?([a-zA-Z0-9_\-\.\s@]+)\b', p)
+    if read_match:
+        target = read_match.group(1).strip()
+        # Avoid matching generic phrases like "read whatsapp" without target
+        if target and target not in ["messages", "inbox", "chats", "all", "please", "now"]:
+            try:
+                res = subprocess.run([str(milo_wa_bin), "read", target], capture_output=True, text=True, timeout=12)
+                if res.stdout.strip():
+                    clean_out = re.sub(r'\x1b\[[0-9;]*m', '', res.stdout.strip())
+                    return clean_out, "Milo WhatsApp Copilot"
+            except Exception:
+                pass
+
+    # 3. Send WhatsApp message: "send whatsapp message to <target> saying <msg>" / "send whatsapp to <target>: <msg>"
+    send_match = re.search(r'\bsend\s+(?:a\s+)?(?:whatsapp|wa)(?:\s+message)?\s+to\s+([^:,\n]+?)(?:\s+saying\s+|\s*:\s*|\s+that\s+)(.+)$', prompt, re.IGNORECASE)
+    if send_match:
+        target = send_match.group(1).strip().strip('"\'')
+        body = send_match.group(2).strip().strip('"\'')
+        if target and body:
+            try:
+                res = subprocess.run([str(milo_wa_bin), "send", target, body], capture_output=True, text=True, timeout=15)
+                out = res.stdout.strip() or res.stderr.strip()
+                if out:
+                    clean_out = re.sub(r'\x1b\[[0-9;]*m', '', out)
+                    return clean_out, "Milo WhatsApp Copilot"
+            except Exception:
+                pass
+
+    # 4. Check WhatsApp / Unread messages / Status
+    if re.search(r'\b(?:check\s+(?:my\s+)?(?:whatsapp|wa)|any\s+(?:new\s+)?(?:whatsapp|wa)\s+messages?|what(?:\'?s|\s+is)\s+on\s+(?:whatsapp|wa)|do\s+i\s+have\s+(?:any\s+)?(?:new\s+)?(?:whatsapp|wa)\s+messages?)\b', p) or \
+       p in ["check whatsapp", "check wa", "whatsapp", "wa", "unread whatsapp", "unread wa", "whatsapp unread", "whatsapp inbox", "open whatsapp"]:
+        try:
+            res = subprocess.run([str(milo_wa_bin), "list"], capture_output=True, text=True, timeout=12)
+            if res.stdout.strip():
+                clean_out = re.sub(r'\x1b\[[0-9;]*m', '', res.stdout.strip())
+                return clean_out, "Milo WhatsApp Copilot"
+        except Exception:
+            pass
+
+    return None
+
+
 def handle_pkg_intent(prompt: str) -> Optional[Tuple[str, str]]:
     """Detect and handle package install/remove/update requests."""
     if prompt.startswith("You are Milo") or "system:" in prompt.lower() or len(prompt.split()) > 15:
@@ -1085,6 +1151,11 @@ def execute_hybrid_query(prompt: str) -> Tuple[str, str]:
     mail_res = handle_mail_intent(prompt)
     if mail_res:
         return mail_res
+
+    # 0.35 Check WhatsApp-specific intent
+    wa_res = handle_whatsapp_intent(prompt)
+    if wa_res:
+        return wa_res
 
     # 1. Check optical vision intent
     cam_res = handle_camera_intent(prompt)
