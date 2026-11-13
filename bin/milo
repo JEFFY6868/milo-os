@@ -21,6 +21,10 @@ case "$CMD" in
     shift
     exec ${HOME}/.local/bin/milo-open "$@"
     ;;
+  graph|graphify)
+    shift
+    exec ${HOME}/.local/bin/milo-graph "$@"
+    ;;
   install)
     shift
     exec ${HOME}/.local/bin/milo-pkg install "$@"

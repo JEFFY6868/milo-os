@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Milo OS — Knowledge Graph Viewer & Query Engine (milo-graph)
+# Powered by Graphify-Labs AST & Semantic Knowledge Graph Engine
+# Part of MiloOS. Built for Arch Linux & Hyprland.
+# ==============================================================================
+set -eo pipefail
+
+VAULT_DIR="${HOME}/MiloNotes"
+GRAPH_JSON="${VAULT_DIR}/graphify-out/graph.json"
+GRAPH_HTML="${VAULT_DIR}/graphify-out/graph.html"
+CANVAS_FILE="${VAULT_DIR}/MiloNotes_Knowledge_Graph.canvas"
+
+cmd="${1:-view}"
+
+case "$cmd" in
+  view|open|browse|"")
+    echo "🌐 Opening Milo Knowledge Graph visualizer in browser..."
+    if [ -f "$GRAPH_HTML" ]; then
+      nohup xdg-open "$GRAPH_HTML" >/dev/null 2>&1 &
+    else
+      echo "Graph not generated yet. Running initial extraction..."
+      exec "$0" sync
+    fi
+    ;;
+  canvas)
+    echo "🎨 Opening Milo Knowledge Graph Canvas in Obsidian..."
+    if [ -f "$CANVAS_FILE" ]; then
+      nohup xdg-open "$CANVAS_FILE" >/dev/null 2>&1 &
+    fi
+    ;;
+  sync|index|rebuild)
+    echo -e "\033[1;36m🧠 [Milo Knowledge Graph] Re-indexing Milo Notes vault with Graphify...\033[0m"
+    set -a
+    if [ -f "${HOME}/.config/milo/keys.env" ]; then
+      source "${HOME}/.config/milo/keys.env"
+    fi
+    set +a
+    ~/.local/bin/graphify extract "$VAULT_DIR" --no-cluster
+    ~/.local/bin/graphify export html --graph "$GRAPH_JSON"
+    ~/.local/bin/graphify export obsidian --graph "$GRAPH_JSON" --dir "${VAULT_DIR}/graphify-out/obsidian_vault"
+    cp "${VAULT_DIR}/graphify-out/obsidian_vault/graph.canvas" "$CANVAS_FILE" 2>/dev/null || true
+    echo -e "\033[1;32m✔ Sync complete: Knowledge graph updated at ${GRAPH_JSON}\033[0m"
+    ;;
+  explain)
+    shift
+    exec ~/.local/bin/graphify explain "$@" --graph "$GRAPH_JSON"
+    ;;
+  path)
+    shift
+    exec ~/.local/bin/graphify path "$@" --graph "$GRAPH_JSON"
+    ;;
+  --help|-h|help)
+    echo "Milo Knowledge Graph (milo-graph)"
+    echo "Usage:"
+    echo "  milo graph [view]           Open interactive HTML graph visualizer"
+    echo "  milo graph canvas           Open visual graph.canvas in Obsidian"
+    echo "  milo graph sync             Re-extract and update the knowledge graph"
+    echo "  milo graph explain <node>   Inspect connections of a concept or note"
+    echo "  milo graph path <A> <B>     Find shortest connection path between two concepts"
+    exit 0
+    ;;
+  *)
+    exec ~/.local/bin/graphify "$cmd" "$@"
+    ;;
+esac
